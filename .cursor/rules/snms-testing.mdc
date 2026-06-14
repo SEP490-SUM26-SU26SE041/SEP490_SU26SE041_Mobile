@@ -1,0 +1,291 @@
+---
+description: SNMS Testing — Flutter test, snapshot, integration test cho SNMS app
+alwaysApply: true
+---
+
+# SNMS Testing Protocol
+
+## Test Categories
+
+### 1. Widget Tests (UI)
+
+Mỗi widget mới PHẢI có widget test. Place test trong `test/features/[feature_name]/widgets/`.
+
+**Test structure:**
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+void main() {
+  group('[WidgetName]', () {
+    group('rendering', () {
+      testWidgets('renders correctly with required data', (tester) async {
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              theme: AppTheme.light,
+              home: Scaffold(body: SNMSCard(child: Text('data'))),
+            ),
+          ),
+        );
+        expect(find.text('data'), findsOneWidget);
+      });
+    });
+
+    group('states', () {
+      testWidgets('shows loading shimmer', (tester) async {
+        // ...
+      });
+
+      testWidgets('shows error with retry', (tester) async {
+        // ...
+      });
+
+      testWidgets('shows empty state message', (tester) async {
+        // ...
+      });
+    });
+
+    group('interactions', () {
+      testWidgets('triggers onTap callback', (tester) async {
+        bool tapped = false;
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: Scaffold(
+                body: SNMSCard(
+                  onTap: () => tapped = true,
+                  child: Text('tap me'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('tap me'));
+        expect(tapped, isTrue);
+      });
+    });
+
+    group('theming', () {
+      testWidgets('renders correctly in dark mode', (tester) async {
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              theme: AppTheme.dark,
+              home: Scaffold(body: SNMSCard(child: Text('dark'))),
+            ),
+          ),
+        );
+        expect(find.text('dark'), findsOneWidget);
+      });
+    });
+  });
+}
+```
+
+### 2. Provider Tests (Logic)
+
+Test Riverpod providers với mock repository. Place trong `test/features/[feature_name]/providers/`.
+
+```dart
+void main() {
+  group('ExperimentsNotifier', () {
+    late ProviderContainer container;
+
+    setUp(() {
+      container = ProviderContainer(
+        overrides: [
+          experimentRepositoryProvider.overrideWithValue(MockExperimentRepo()),
+        ],
+      );
+    });
+
+    tearDown(() => container.dispose());
+
+    test('loadExperiments returns list on success', () async {
+      final result = await container.read(experimentsProvider.future);
+      expect(result, isNotEmpty);
+    });
+
+    test('createExperiment updates list after creation', () async {
+      container.read(experimentActionsProvider.notifier).createExperiment(dto);
+      container.read(experimentsProvider.invalidate);
+      final result = await container.read(experimentsProvider.future);
+      expect(result.length, 2);
+    });
+  });
+}
+```
+
+### 3. Model Tests
+
+Test Freezed models serialization. Place trong `test/models/`.
+
+```dart
+void main() {
+  group('ExperimentModel', () {
+    test('fromJson creates correct model', () {
+      final json = {...};
+      final model = ExperimentModel.fromJson(json);
+      expect(model.id, equals('exp-001'));
+    });
+
+    test('toJson produces valid JSON', () {
+      final model = ExperimentModel(...);
+      final json = model.toJson();
+      expect(json['id'], isNotNull);
+    });
+
+    test('copyWith creates modified copy', () {
+      final original = ExperimentModel(...);
+      final modified = original.copyWith(status: ExperimentStatus.completed);
+      expect(modified.status, ExperimentStatus.completed);
+      expect(original.status, ExperimentStatus.active);
+    });
+  });
+}
+```
+
+### 4. Integration Tests
+
+Test navigation flows và end-to-end user journeys. Place trong `test/integration/`.
+
+**Test login → dashboard flow:**
+```dart
+void main() {
+  integrationTest('researcher login and view dashboard', (tester) async {
+    await tester.app.start();
+    await tester.enterText(find.byKey(loginEmailKey), 'khoa.researcher@snms.vn');
+    await tester.enterText(find.byKey(loginPasswordKey), 'password');
+    await tester.tap(find.byKey(loginButtonKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(DashboardScreen), findsOneWidget);
+    expect(find.text('TS. Nguyễn Minh Khoa'), findsOneWidget);
+  });
+}
+```
+
+---
+
+## Test Coverage Requirements
+
+| Layer | Min Coverage |
+|-------|-------------|
+| Widgets | 80% |
+| Providers | 90% |
+| Models | 95% |
+| Repositories | 85% |
+
+---
+
+## Running Tests
+
+```bash
+# All tests
+flutter test
+
+# Specific feature
+flutter test test/features/experiments/
+
+# With coverage
+flutter test --coverage
+
+# Watch mode
+flutter test --watch
+
+# Integration tests
+flutter test integration_test/
+```
+
+---
+
+## Mock Data Reference
+
+Luôn dùng mock data từ `SNMS_APP_SPEC.md` khi viết test:
+
+- `mockUsers` — 6 users (Researcher, FarmManager, 2 Technicians, 2 Students)
+- `mockFarm` — Farm → Area → Zone → Bed → Sensor hierarchy
+- `mockExperiments` — Active experiment với groups, stages, growth records
+- `mockTasks` — Tasks với AI suggestions
+- `mockNotifications` — Alerts, task updates, system notifications
+
+---
+
+## Golden/Snapshot Tests cho Design System
+
+```dart
+void main() {
+  testWidgets('SNMSCard golden test', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
+          body: SNMSCard(
+            child: Text('Golden Test'),
+          ),
+        ),
+      ),
+    );
+    await expectLater(find.byType(SNMSCard), matchesGoldenFile('goldens/snms_card_light.png'));
+  });
+
+  testWidgets('SNMSCard dark mode golden test', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark,
+        home: Scaffold(
+          body: SNMSCard(
+            child: Text('Golden Test'),
+          ),
+        ),
+      ),
+    );
+    await expectLater(find.byType(SNMSCard), matchesGoldenFile('goldens/snms_card_dark.png'));
+  });
+}
+```
+
+---
+
+## Test Naming Convention
+
+```
+test/
+├── features/
+│   └── [feature_name]/
+│       ├── widgets/
+│       │   ├── experiment_card_test.dart
+│       │   └── batch_card_test.dart
+│       └── providers/
+│           └── experiment_provider_test.dart
+├── models/
+│   ├── user_model_test.dart
+│   └── experiment_model_test.dart
+├── integration/
+│   ├── login_flow_test.dart
+│   └── experiment_creation_flow_test.dart
+└── goldens/
+    ├── snms_card_light.png
+    └── snms_card_dark.png
+```
+
+---
+
+## CI/CD Test Requirements
+
+Trước mỗi PR:
+1. `flutter test` phải pass 100%
+2. `flutter analyze` không có errors
+3. Coverage ≥ 70% overall
+
+---
+
+## Anti-patterns — Không làm
+
+- ❌ Không viết test không có assertion
+- ❌ Không ignore test mà không có lý do rõ ràng
+- ❌ Không hardcoded giá trị magic numbers trong test
+- ❌ Không test implementation detail thay vì behavior
+- ❌ Không dùng `tester.pump()` thay vì `pumpAndSettle()` khi cần animation kết thúc
+- ❌ Không mock class bên trong test — mock ở boundary (repository, provider)

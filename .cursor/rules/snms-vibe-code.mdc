@@ -1,0 +1,256 @@
+---
+description: SNMS Vibe Code — Phát triển SNMS tự động với test và improve
+alwaysApply: true
+---
+
+# SNMS Vibe Code Engine
+
+## Nguồn tri thức bắt buộc
+
+Trước mọi lần vibe code, agent **PHẢI đọc và tuân thủ tuyệt đối**:
+- `SNMS_FLUTTER_SKILL.md` — Design system, component library, tech stack, animation spec, layout rules
+- `SNMS_APP_SPEC.md` — Nghiệp vụ chi tiết, screen map theo role, data model, mock data
+
+---
+
+## Quy Trình Vibe Code — 5 Phase Mỗi Feature
+
+### PHASE 1: ANALYZE (phân tích)
+
+**Trước khi viết bất kỳ dòng nào:**
+1. Xác định **feature/screen** cần build — tra cứu trong `SNMS_APP_SPEC.md`
+2. Xác định **role** sẽ sử dụng (Admin/Researcher/FarmManager/Technician/Student)
+3. Tra cứu **screen inventory** trong `SNMS_FLUTTER_SKILL.md` để biết route
+4. Tra cứu **component library** để tái sử dụng widget có sẵn
+5. Tra cứu **data model** trong `SNMS_APP_SPEC.md` để biết mock data
+6. Kiểm tra **Sprint priority** trong `SNMS_APP_SPEC.md` phần 9
+
+### PHASE 2: GENERATE (sinh code)
+
+**Thứ tự sinh code bắt buộc:**
+1. Data layer: model (Freezed) → repository → provider (Riverpod)
+2. Presentation layer: widget → screen → router
+
+**Áp dụng design system:**
+- **Color**: Chỉ dùng `Theme.of(context).colorScheme` hoặc `AppColors`
+- **Spacing**: Chỉ dùng `AppSpacing` (xs/sm/md/lg/xl/xxl/xxxl/huge)
+- **Typography**: Chỉ dùng `Theme.of(context).textTheme`
+- **Radius**: Chỉ dùng `AppRadius`
+- **Animation**: Dùng `AppDuration` và `AppCurve`
+
+**Constraint quan trọng:**
+- Tối đa **1 primary CTA** mỗi screen
+- Alerts luôn hiển thị **ĐẦU TIÊN** trên mọi screen
+- Charts luôn hiển thị **SAU** actionable cards
+- Maximum **1 line summary** cho cards
+- Widget file ≤ 150 dòng; Screen file ≤ 300 dòng
+- Dùng `ListView.builder` cho danh sách > 5 items
+- Dùng `const` constructor mọi nơi có thể
+- Mỗi interactive element phải có `Semantics` label
+
+**Dashboard layout order (bắt buộc):**
+```
+1. AppBar (greeting + role badge + notifications)
+2. AlertBanner(s) — nếu có alert
+3. KPI Tiles (2×2 grid)
+4. Quick Actions (tối đa 3)
+5. Active Work
+6. Analytics charts (SAU phần action)
+```
+
+### PHASE 3: TEST (kiểm thử)
+
+**Sau mỗi feature/function được viết xong, thực hiện:**
+
+1. **Build test**: Chạy `flutter analyze` để kiểm tra lỗi
+2. **Widget test**: Viết widget test cho mỗi component mới
+3. **Logic test**: Viết unit test cho provider/repository logic
+4. **Integration point**: Verify data flow từ provider → widget → screen
+
+**Test checklist cho mỗi feature:**
+- [ ] Code compile không lỗi (`flutter analyze`)
+- [ ] Widget test pass cho các component chính
+- [ ] Dark mode hoạt động đúng
+- [ ] Navigation đúng route theo GoRouter
+- [ ] Riverpod state update đúng
+- [ ] Error state được xử lý (loading/error/empty)
+- [ ] Accessibility labels tồn tại
+
+**Flutter analyze command:**
+```bash
+flutter analyze lib/features/[feature_name]
+```
+
+**Widget test template:**
+```dart
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  group('[WidgetName]', () {
+    testWidgets('renders correctly with required data', (tester) async {
+      // arrange
+      // act
+      // assert
+    });
+
+    testWidgets('shows loading state', (tester) async {
+      // arrange
+      // act
+      // assert
+    });
+
+    testWidgets('shows error state', (tester) async {
+      // arrange
+      // act
+      // assert
+    });
+  });
+}
+```
+
+### PHASE 4: REVIEW (chấm điểm)
+
+**Sau khi test pass, tự chấm điểm theo 3 chiều:**
+
+#### UI/UX Score (thang 10, mỗi tiêu chí 1 điểm):
+1. **Visual Hierarchy**: Alerts → KPIs → Actions → Analytics đúng thứ tự?
+2. **Color Tokens**: Không hardcoded color? Dùng theme?
+3. **Spacing Consistency**: Dùng AppSpacing scale?
+4. **Typography**: Dùng textTheme? Không hardcoded font size/weight?
+5. **Touch Targets**: Min 48×48dp cho interactive elements?
+6. **Dark Mode**: Cả light + dark theme đều OK?
+7. **Animation**: Dùng AppDuration/AppCurve?
+8. **Responsive**: Adaptive layout cho nhiều screen size?
+9. **Empty/Loading/Error**: 3 trạng thái đều có UI?
+10. **Accessibility**: Semantic labels, contrast ratio đủ?
+
+#### Nghiệp Vụ Score (thang 10):
+1. **Data Flow**: Provider → Repository → API/Database đúng flow?
+2. **Role Permissions**: Hiển thị đúng nội dung theo user role?
+3. **State Management**: Riverpod đúng pattern? Không setState?
+4. **Navigation**: GoRouter đúng route? Redirect auth đúng?
+5. **Form Validation**: Validate đầy đủ các trường bắt buộc?
+6. **Error Handling**: AsyncError được handle? Error message user-friendly?
+7. **Data Integrity**: Mock data đúng model?
+8. **Business Logic**: Logic nghiệp vụ đúng spec?
+9. **Notification Triggers**: Các notification trigger đúng như spec phần 7?
+10. **Chatbot Context**: Chatbot có đúng context theo role?
+
+#### Code Quality Score (thang 10):
+1. **No Hardcoding**: Colors, spacing, text styles đều từ design tokens?
+2. **Widget Reuse**: Dùng lại shared widgets?
+3. **File Size**: Widget ≤ 150, Screen ≤ 300 lines?
+4. **Const Constructors**: Dùng const mọi nơi có thể?
+5. **Riverpod Pattern**: Đúng annotation pattern?
+6. **Freezed Models**: Data models dùng freezed?
+7. **API Layer**: Dio client đúng pattern?
+8. **Clean Separation**: data/domain/presentation layer tách biệt?
+9. **No Navigator.push**: Dùng GoRouter cho mọi navigation?
+10. **Linter Clean**: `flutter analyze` không warning?
+
+**Tổng điểm = (UI/UX + Nghiệp vụ + Code Quality) / 3**
+**Ngưỡng pass**: ≥ 8/10 mỗi chiều
+
+### PHASE 5: IMPROVE (cải thiện)
+
+**Nếu score < 8 ở bất kỳ chiều nào, IMPROVE:**
+
+**UI/UX Improve:**
+- Thêm/move Alerts đúng vị trí
+- Thay hardcoded colors bằng theme tokens
+- Thêm loading/error/empty states
+- Bổ sung semantic labels
+- Kiểm tra touch target sizes
+
+**Nghiệp Vụ Improve:**
+- Thêm missing validation
+- Fix state management (Riverpod pattern)
+- Đảm bảo role-based content
+- Fix notification triggers
+- Verify business logic flow
+
+**Code Quality Improve:**
+- Extract repeated code thành shared widgets
+- Split large files
+- Add const constructors
+- Fix Riverpod/Freezed patterns
+- Chạy `flutter analyze` và fix warnings
+
+**Sau khi improve, quay lại PHASE 4 để re-score cho đến khi đạt ≥ 8/10 mỗi chiều.**
+
+---
+
+## Sprint Priority (theo SNMS_APP_SPEC.md phần 9)
+
+**Sprint 1 — Core Researcher flow (ƯU TIÊN CAO NHẤT):**
+1. Login Screen
+2. Researcher Dashboard
+3. Experiment List
+4. Create Experiment Request (3 steps)
+5. Experiment Detail (Tab Overview + Tab Stages)
+
+**Sprint 2 — So sánh nhóm:**
+6. Groups Comparison chart
+7. Create Task + AI Assignment Panel
+8. Task Detail
+
+**Sprint 3 — Student + Technician:**
+9. Student Dashboard + My Tasks
+10. Growth Log + Chart
+11. Technician Dashboard + Tasks
+12. Technician Report
+
+**Sprint 4 — Farm + Notification + Chat:**
+13. Farm Map Hierarchy
+14. Notification Screen
+15. Chatbot
+
+---
+
+## Design Tokens Reference
+
+**Spacing (CHỈ dùng these values):**
+```
+AppSpacing.xs   = 4.0
+AppSpacing.sm   = 8.0
+AppSpacing.md   = 12.0
+AppSpacing.lg   = 16.0
+AppSpacing.xl   = 24.0
+AppSpacing.xxl  = 32.0
+AppSpacing.xxxl = 48.0
+AppSpacing.huge = 64.0
+```
+
+**Colors (CHỈ dùng AppColors hoặc theme):**
+```
+Brand:   primary #2E7D32, primaryLight #4CAF50, accent #81C784
+Semantic: success #4CAF50, warning #FFA726, error #EF5350, info #42A5F5
+Sensor:  online #4CAF50, offline #EF5350, warning #FFA726, idle #90A4AE
+```
+
+---
+
+## Mô tả workflow cho user
+
+Sau mỗi feature, báo cáo score cho user theo format:
+
+```
+### Feature: [Tên Feature]
+**Build**: ✅ Pass | ❌ Fail  
+**UI/UX Score**: X/10 — [điểm mạnh] → [cần cải thiện]  
+**Nghiệp Vụ Score**: X/10 — [điểm mạnh] → [cần cải thiện]  
+**Code Quality Score**: X/10 — [điểm mạnh] → [cần cải thiện]  
+**Overall**: X/10 — ✅ Pass (≥8) | 🔧 Improved → ✅ Pass  
+**Đã improve**: [liệt kê thay đổi]
+```
+
+---
+
+## Sprint Flow
+
+Mỗi lần user yêu cầu build feature:
+1. Check sprint priority trong `SNMS_APP_SPEC.md` phần 9
+2. Nếu feature nằm trong Sprint hiện tại → proceed
+3. Nếu feature sprint cao hơn → suggest hoàn thành sprint hiện tại trước
+4. Sau mỗi feature: test → review → improve → báo cáo score
+5. Sau khi hoàn thành sprint → summary toàn bộ score
