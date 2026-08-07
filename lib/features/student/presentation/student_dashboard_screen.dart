@@ -1,60 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/date_utils.dart';
 import '../../../shared/widgets/agritech_environment_background.dart';
 import '../../../shared/widgets/glass_widgets.dart';
 import '../../../shared/widgets/plant_photo_gallery.dart';
 import '../../../shared/widgets/profile_button.dart';
 import '../../../shared/widgets/snms_card.dart';
 import '../../../shared/models/growth_task_model.dart';
-import '../../../shared/models/experiment_model.dart';
-import '../../../shared/utils/experiment_helper.dart';
-import '../../../shared/models/care_activity_model.dart';
-
-final List<TaskModel> _mockStudentTasks = [
-  TaskModel(
-    id: 'task-s001',
-    taskName: 'Quan sat tang truong Nhom Doi Chung - Tuan 4',
-    taskType: TaskType.observation,
-    experimentId: 'exp-001',
-    stageId: 'stage-003',
-    batchId: 'batch-ctrl-01',
-    status: TaskStatus.inProgress,
-    assignedTo: 'usr-student-001',
-    dueDate: DateTime.now(),
-    description: 'Theo doi su phat trien cua cay trong nhom doi chung trong giai doan tang truong.',
-  ),
-  TaskModel(
-    id: 'task-s002',
-    taskName: 'Ghi nhan chieu cao cay - Ngay 08/06',
-    taskType: TaskType.observation,
-    experimentId: 'exp-001',
-    stageId: 'stage-003',
-    batchId: 'batch-ctrl-01',
-    status: TaskStatus.pending,
-    assignedTo: 'usr-student-001',
-    dueDate: DateTime.now(),
-  ),
-  TaskModel(
-    id: 'task-s003',
-    taskName: 'Kiem tra tinh trang la - Nhom Thuc Nghiem',
-    taskType: TaskType.inspection,
-    experimentId: 'exp-001',
-    stageId: 'stage-003',
-    batchId: 'batch-trt-01',
-    status: TaskStatus.completed,
-    assignedTo: 'usr-student-001',
-    dueDate: DateTime.now().subtract(const Duration(days: 1)),
-  ),
-];
-
-final studentTasksProvider = FutureProvider<List<TaskModel>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 300));
-  return _mockStudentTasks;
-});
+import '../providers/student_task_providers.dart';
 
 class StudentDashboardScreen extends ConsumerWidget {
   const StudentDashboardScreen({super.key});
@@ -419,16 +375,16 @@ class _TaskCard extends StatelessWidget {
       TaskType.fertilizing => Icons.science_rounded,
       TaskType.observation => Icons.visibility_rounded,
       TaskType.inspection  => Icons.search_rounded,
+      TaskType.other       => Icons.more_horiz_rounded,
     };
   }
 
   @override
   Widget build(BuildContext context) {
-    final expCode = ExperimentHelper.getExperimentCode(task.experimentId);
-    final stageName = ExperimentHelper.getStageName(task.experimentId, task.stageId);
-    final stageStatus = ExperimentHelper.getStageStatus(task.experimentId, task.stageId);
-    final stageStatusColor = _stageStatusColor(stageStatus);
-    final batchLabel = ExperimentHelper.getBatchLabel(task.batchId);
+    // Use API data directly, fallback to — if not available
+    final expCode = task.experimentCode ?? '—';
+    final stageName = task.experimentStageName ?? '—';
+    final batchLabel = task.batchCode ?? '—';
 
     return GlassCard(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -499,12 +455,12 @@ class _TaskCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
-                      color: stageStatusColor.withAlpha(15),
+                      color: AppColors.info.withAlpha(15),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      ExperimentHelper.getStageStatusLabel(stageStatus),
-                      style: tt.labelSmall?.copyWith(color: stageStatusColor, fontWeight: FontWeight.w600, fontSize: 9),
+                      'Student',
+                      style: tt.labelSmall?.copyWith(color: AppColors.info, fontWeight: FontWeight.w600, fontSize: 9),
                     ),
                   ),
                 ],
@@ -521,22 +477,13 @@ class _TaskCard extends StatelessWidget {
                 const Spacer(),
                 Icon(Icons.schedule_rounded, size: 11, color: cs.onSurface.withAlpha(102)),
                 const SizedBox(width: 2),
-                Text(DateFormat('HH:mm').format(task.dueDate), style: tt.labelSmall?.copyWith(color: cs.onSurface.withAlpha(102), fontSize: 10)),
+                Text(formatTime(task.dueDate), style: tt.labelSmall?.copyWith(color: cs.onSurface.withAlpha(102), fontSize: 10)),
               ],
             ),
           ],
         ],
       ),
     );
-  }
-
-  Color _stageStatusColor(StageStatus? status) {
-    if (status == null) return cs.onSurface.withAlpha(102);
-    return switch (status) {
-      StageStatus.active    => AppColors.primary,
-      StageStatus.completed => AppColors.success,
-      StageStatus.upcoming  => AppColors.warning,
-    };
   }
 
   void _showTaskDetail(BuildContext context, TaskModel task) {
@@ -556,8 +503,8 @@ class _StudentTaskDetailSheetState extends State<_StudentTaskDetailSheet> {
   final _heightController = TextEditingController();
   final _leafCountController = TextEditingController();
   final _noteController = TextEditingController();
-  String _selectedLeafColor = PlantEnums.leafColors[0];
-  String _selectedHealth = PlantEnums.healthStatuses[0];
+  String _selectedLeafColor = 'Xanh đậm';
+  String _selectedHealth = 'Khỏe mạnh';
   final List<String> _photoUrls = [];
   bool _showReportForm = false;
 
@@ -579,10 +526,10 @@ class _StudentTaskDetailSheetState extends State<_StudentTaskDetailSheet> {
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final expCode = ExperimentHelper.getExperimentCode(widget.task.experimentId);
-    final stageName = ExperimentHelper.getStageName(widget.task.experimentId, widget.task.stageId);
-    final stage = ExperimentHelper.getStage(widget.task.experimentId, widget.task.stageId);
-    final batchLabel = ExperimentHelper.getBatchLabel(widget.task.batchId);
+    // Use API data directly
+    final expCode = widget.task.experimentCode ?? '—';
+    final stageName = widget.task.experimentStageName ?? '—';
+    final batchLabel = widget.task.batchCode ?? '—';
 
     return Container(
       decoration: BoxDecoration(
@@ -636,16 +583,12 @@ class _StudentTaskDetailSheetState extends State<_StudentTaskDetailSheet> {
                       const SizedBox(height: AppSpacing.md),
                       Row(
                         children: [
-                          _InfoRow(icon: Icons.calendar_today_rounded, label: 'Hạn', value: DateFormat('dd/MM/yyyy').format(widget.task.dueDate), tt: tt, cs: cs),
+                          _InfoRow(icon: Icons.calendar_today_rounded, label: 'Hạn', value: formatDate(widget.task.dueDate), tt: tt, cs: cs),
                           const SizedBox(width: AppSpacing.xl),
                           _InfoRow(icon: _getTaskIcon(widget.task.taskType), label: 'Loại', value: widget.task.taskTypeLabel, tt: tt, cs: cs),
                         ],
                       ),
-                      if (stage != null) ...[
-                        const SizedBox(height: AppSpacing.sm),
-                        _InfoRow(icon: Icons.timelapse_rounded, label: 'Giai đoạn', value: stage.stageName, tt: tt, cs: cs),
-                      ],
-                      if (widget.task.description != null) ...[
+                      if (widget.task.description != null && widget.task.description!.isNotEmpty) ...[
                         const SizedBox(height: AppSpacing.md),
                         Text(widget.task.description!, style: tt.bodyMedium?.copyWith(color: cs.onSurface.withAlpha(153))),
                       ],
@@ -726,7 +669,12 @@ class _StudentTaskDetailSheetState extends State<_StudentTaskDetailSheet> {
                             filled: true,
                             fillColor: cs.surfaceContainerHighest.withAlpha(128),
                           ),
-                          items: PlantEnums.leafColors.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                          items: const [
+                            DropdownMenuItem(value: 'Xanh đậm', child: Text('Xanh đậm')),
+                            DropdownMenuItem(value: 'Xanh nhạt', child: Text('Xanh nhạt')),
+                            DropdownMenuItem(value: 'Vàng nhẹ', child: Text('Vàng nhẹ')),
+                            DropdownMenuItem(value: 'Vàng đậm', child: Text('Vàng đậm')),
+                          ],
                           onChanged: (v) => setState(() => _selectedLeafColor = v ?? _selectedLeafColor),
                         ),
                         const SizedBox(height: AppSpacing.md),
@@ -738,7 +686,11 @@ class _StudentTaskDetailSheetState extends State<_StudentTaskDetailSheet> {
                             filled: true,
                             fillColor: cs.surfaceContainerHighest.withAlpha(128),
                           ),
-                          items: PlantEnums.healthStatuses.map((h) => DropdownMenuItem(value: h, child: Text(h))).toList(),
+                          items: const [
+                            DropdownMenuItem(value: 'Khỏe mạnh', child: Text('Khỏe mạnh')),
+                            DropdownMenuItem(value: 'Bình thường', child: Text('Bình thường')),
+                            DropdownMenuItem(value: 'Có vấn đề', child: Text('Có vấn đề')),
+                          ],
                           onChanged: (v) => setState(() => _selectedHealth = v ?? _selectedHealth),
                         ),
                         const SizedBox(height: AppSpacing.md),
@@ -860,6 +812,7 @@ class _StudentTaskDetailSheetState extends State<_StudentTaskDetailSheet> {
       TaskType.fertilizing => Icons.science_rounded,
       TaskType.observation => Icons.visibility_rounded,
       TaskType.inspection  => Icons.search_rounded,
+      TaskType.other       => Icons.more_horiz_rounded,
     };
   }
 }
@@ -1024,6 +977,10 @@ class _StudentGuidanceCard extends StatelessWidget {
         '2. Tạo lỗ chấm nước 2-3cm sau cây.\n'
         '3. Tưới nước nhẹ ngay sau trồng.\n'
         '4. Theo dõi 3-5 ngày đầu sau trồng.',
+      TaskType.other =>
+        '1. Thực hiện theo hướng dẫn của giáo viên.\n'
+        '2. Ghi nhận tiến độ và kết quả.\n'
+        '3. Báo cáo khi hoàn thành.',
     };
   }
 

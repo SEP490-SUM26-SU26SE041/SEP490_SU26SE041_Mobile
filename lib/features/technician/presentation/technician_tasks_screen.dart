@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -6,155 +7,98 @@ import '../../../shared/widgets/snms_card.dart';
 import '../../../shared/models/growth_task_model.dart';
 import '../../../shared/models/experiment_model.dart';
 import '../../../shared/utils/experiment_helper.dart';
+import '../../student/presentation/widgets/quick_report_sheet.dart';
+import '../../student/presentation/widgets/quick_measurement_sheet.dart';
+import '../../student/presentation/widgets/task_report_view_sheet.dart';
+import '../providers/technician_task_providers.dart';
+import '../../tasks/providers/task_report_providers.dart' as report_providers;
 
-final List<TaskModel> _mockTechnicianTasks = [
-  TaskModel(
-    id: 'task-t001',
-    taskName: 'Tưới nước - Nhóm Đối Chứng',
-    taskType: TaskType.watering,
-    experimentId: 'exp-001',
-    stageId: 'stage-003',
-    batchId: 'batch-ctrl-01',
-    status: TaskStatus.pending,
-    assignedTo: 'usr-technician-001',
-    dueDate: DateTime.now(),
-    description: 'Tưới nhỏ giọt 200ml/gốc cây cho nhóm đối chứng trong giai đoạn tăng trưởng.',
-  ),
-  TaskModel(
-    id: 'task-t002',
-    taskName: 'Bón phân NPK - Nhóm Thực Nghiệm',
-    taskType: TaskType.fertilizing,
-    experimentId: 'exp-001',
-    stageId: 'stage-003',
-    batchId: 'batch-trt-01',
-    status: TaskStatus.inProgress,
-    assignedTo: 'usr-technician-001',
-    dueDate: DateTime.now(),
-    description: 'Bón phân NPK 20-20-20, 5g/cây cho nhóm thực nghiệm.',
-  ),
-  TaskModel(
-    id: 'task-t003',
-    taskName: 'Kiểm tra độ ẩm đất',
-    taskType: TaskType.inspection,
-    experimentId: 'exp-001',
-    stageId: 'stage-003',
-    batchId: 'batch-ctrl-01',
-    status: TaskStatus.pending,
-    assignedTo: 'usr-technician-001',
-    dueDate: DateTime.now(),
-  ),
-  TaskModel(
-    id: 'task-t004',
-    taskName: 'Tưới nước - Khu thủy canh',
-    taskType: TaskType.watering,
-    experimentId: 'exp-001',
-    stageId: 'stage-002',
-    batchId: 'batch-trt-01',
-    status: TaskStatus.completed,
-    assignedTo: 'usr-technician-001',
-    dueDate: DateTime.now().subtract(const Duration(days: 1)),
-  ),
-  TaskModel(
-    id: 'task-t005',
-    taskName: 'Điều chỉnh độ ẩm đất',
-    taskType: TaskType.inspection,
-    experimentId: 'exp-001',
-    stageId: 'stage-002',
-    batchId: 'batch-ctrl-01',
-    status: TaskStatus.completed,
-    assignedTo: 'usr-technician-001',
-    dueDate: DateTime.now().subtract(const Duration(days: 1)),
-  ),
-];
+// Technician Task Filter
+enum TechnicianTaskFilter { pending, inProgress, today, tomorrow, dueSoon, overdue, all, completed }
 
-class TechnicianTasksScreen extends StatefulWidget {
+final technicianTaskFilterProvider = StateProvider<TechnicianTaskFilter>((ref) {
+  return TechnicianTaskFilter.pending;
+});
+
+// Filtered tasks provider
+final filteredTechnicianTasksProvider = Provider<AsyncValue<List<TaskModel>>>((ref) {
+  final tasks = ref.watch(technicianTasksProvider);
+  final filter = ref.watch(technicianTaskFilterProvider);
+
+  return tasks.whenData((list) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final dueSoonThreshold = today.add(const Duration(days: 3));
+
+    return list.where((task) {
+      final dueDay = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+
+      return switch (filter) {
+        TechnicianTaskFilter.pending =>
+          task.status == TaskStatus.pending && !dueDay.isBefore(today),
+        TechnicianTaskFilter.inProgress =>
+          task.status == TaskStatus.inProgress && !dueDay.isBefore(today),
+        TechnicianTaskFilter.completed => task.status == TaskStatus.completed,
+        TechnicianTaskFilter.today =>
+          task.status != TaskStatus.completed && dueDay.isAtSameMomentAs(today),
+        TechnicianTaskFilter.tomorrow =>
+          task.status != TaskStatus.completed && dueDay.isAtSameMomentAs(tomorrow),
+        TechnicianTaskFilter.dueSoon =>
+          task.status != TaskStatus.completed &&
+          !dueDay.isBefore(today) &&
+          dueDay.isBefore(dueSoonThreshold),
+        TechnicianTaskFilter.overdue =>
+          task.status != TaskStatus.completed && dueDay.isBefore(today),
+        TechnicianTaskFilter.all => true,
+      };
+    }).toList();
+  });
+});
+
+class TechnicianTasksScreen extends ConsumerWidget {
   const TechnicianTasksScreen({super.key});
 
   @override
-  State<TechnicianTasksScreen> createState() => _TechnicianTasksScreenState();
-}
-
-class _TechnicianTasksScreenState extends State<TechnicianTasksScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  List<TaskModel> _filterTasks(List<TaskModel> all, String status) {
-    return all.where((t) => t.statusLabel == status).toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
+    final filter = ref.watch(technicianTaskFilterProvider);
+    final tasks = ref.watch(filteredTechnicianTasksProvider);
 
     return Scaffold(
       backgroundColor: cs.surface,
       appBar: AppBar(
-        title: Text('Công việc của tôi', style: tt.titleLarge),
+        title: Text('Cong viec cua toi', style: tt.titleLarge),
         backgroundColor: cs.surface,
         elevation: 0,
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Đang chờ'),
-            Tab(text: 'Đang làm'),
-            Tab(text: 'Hoàn thành'),
-          ],
-          labelColor: AppColors.primary,
-          unselectedLabelColor: cs.onSurface.withAlpha(153),
-          indicatorColor: AppColors.primary,
-        ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _buildTaskList(_filterTasks(_mockTechnicianTasks, 'Pending')),
-          _buildTaskList(_filterTasks(_mockTechnicianTasks, 'In Progress')),
-          _buildTaskList(_filterTasks(_mockTechnicianTasks, 'Completed')),
+          _FilterTabs(filter: filter, ref: ref, tt: tt, cs: cs),
+          Expanded(
+            child: tasks.when(
+              data: (taskList) => taskList.isEmpty
+                ? _EmptyState(tt: tt, cs: cs)
+                : ListView.builder(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    itemCount: taskList.length,
+                    itemBuilder: (context, index) => Padding(
+                      padding: EdgeInsets.only(bottom: AppSpacing.md),
+                      child: _TechnicianTaskCard(
+                        task: taskList[index],
+                        tt: tt,
+                        cs: cs,
+                        onTap: () => _showTaskDetail(context, taskList[index]),
+                      ),
+                    ),
+                  ),
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(child: Text('Error: $e')),
+            ),
+          ),
         ],
       ),
-    );
-  }
-
-  Widget _buildTaskList(List<TaskModel> tasks) {
-    if (tasks.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.task_alt_rounded, size: 64, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: AppSpacing.md),
-            Text('Không có công việc', style: Theme.of(context).textTheme.bodyLarge),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      itemCount: tasks.length,
-      itemBuilder: (context, index) {
-        final task = tasks[index];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: AppSpacing.md),
-          child: _TechnicianTaskCard(
-            task: task,
-            onTap: () => _showTaskDetail(context, task),
-          ),
-        );
-      },
     );
   }
 
@@ -163,16 +107,125 @@ class _TechnicianTasksScreenState extends State<TechnicianTasksScreen>
   }
 }
 
-class _TechnicianTaskCard extends StatelessWidget {
-  const _TechnicianTaskCard({required this.task, required this.onTap});
+class _FilterTabs extends ConsumerWidget {
+  const _FilterTabs({required this.filter, required this.ref, required this.tt, required this.cs});
+  final TechnicianTaskFilter filter;
+  final WidgetRef ref;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: TechnicianTaskFilter.values.map((f) {
+            final isSelected = f == filter;
+            final label = switch (f) {
+              TechnicianTaskFilter.pending => 'Đang chờ',
+              TechnicianTaskFilter.inProgress => 'Đang làm',
+              TechnicianTaskFilter.today => 'Hôm nay',
+              TechnicianTaskFilter.tomorrow => 'Ngày mai',
+              TechnicianTaskFilter.dueSoon => 'Sắp hết hạn',
+              TechnicianTaskFilter.overdue => 'Quá hạn',
+              TechnicianTaskFilter.all => 'Tất cả',
+              TechnicianTaskFilter.completed => 'Đã xong',
+            };
+            return Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.sm),
+              child: _FilterChip(
+                label: label,
+                isSelected: isSelected,
+                tt: tt,
+                cs: cs,
+                onTap: () => ref.read(technicianTaskFilterProvider.notifier).state = f,
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({required this.label, required this.isSelected, required this.tt, required this.cs, required this.onTap});
+  final String label;
+  final bool isSelected;
+  final TextTheme tt;
+  final ColorScheme cs;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary : cs.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? AppColors.primary : cs.outline.withAlpha(77)),
+        ),
+        child: Text(
+          label,
+          style: tt.labelMedium?.copyWith(
+            color: isSelected ? Colors.white : cs.onSurface,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.tt, required this.cs});
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inbox_rounded, size: 64, color: cs.onSurface.withAlpha(51)),
+          const SizedBox(height: AppSpacing.md),
+          Text('Khong co cong viec', style: tt.titleMedium?.copyWith(color: cs.onSurface.withAlpha(128))),
+          const SizedBox(height: AppSpacing.xs),
+          Text('Tim thay cong viec phu hop', style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(102))),
+        ],
+      ),
+    );
+  }
+}
+
+class _TechnicianTaskCard extends ConsumerWidget {
+  const _TechnicianTaskCard({
+    required this.task,
+    required this.tt,
+    required this.cs,
+    required this.onTap,
+  });
 
   final TaskModel task;
+  final TextTheme tt;
+  final ColorScheme cs;
   final VoidCallback onTap;
+
+  bool get _isOverdue {
+    return task.status != TaskStatus.completed &&
+        task.dueDate.isBefore(DateTime.now());
+  }
 
   Color get _statusColor {
     return switch (task.status) {
-      TaskStatus.pending    => AppColors.warning,
-      TaskStatus.inProgress => AppColors.info,
+      TaskStatus.pending    => _isOverdue ? AppColors.error : AppColors.warning,
+      TaskStatus.inProgress => _isOverdue ? AppColors.error : AppColors.info,
       TaskStatus.completed  => AppColors.success,
       TaskStatus.overdue    => AppColors.error,
     };
@@ -198,21 +251,23 @@ class _TechnicianTaskCard extends StatelessWidget {
 
   String get _statusLabel {
     return switch (task.status) {
-      TaskStatus.pending    => 'Đang chờ',
-      TaskStatus.inProgress => 'Đang làm',
+      TaskStatus.pending    => _isOverdue ? 'Quá hạn' : 'Đang chờ',
+      TaskStatus.inProgress => _isOverdue ? 'Quá hạn' : 'Đang làm',
       TaskStatus.completed  => 'Hoàn thành',
       TaskStatus.overdue    => 'Quá hạn',
     };
   }
 
   @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
-    final expCode = ExperimentHelper.getExperimentCode(task.experimentId);
-    final stageName = ExperimentHelper.getStageName(task.experimentId, task.stageId);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final expCode = task.experimentCode ?? ExperimentHelper.getExperimentCode(task.experimentId);
+    final stageName = task.experimentStageName ?? ExperimentHelper.getStageName(task.experimentId, task.stageId);
     final stageStatus = ExperimentHelper.getStageStatus(task.experimentId, task.stageId);
-    final batchLabel = ExperimentHelper.getBatchLabel(task.batchId);
+    final batchLabel = (task.batchCode != null && task.batchCode!.isNotEmpty)
+        ? task.batchCode!
+        : ExperimentHelper.getBatchLabel(task.batchId);
+    final reportAsync = ref.watch(report_providers.taskReportByTaskProvider(task.id));
+    final hasReport = reportAsync.maybeWhen(data: (r) => r != null, orElse: () => false);
 
     return SNMSCard(
       onTap: onTap,
@@ -307,6 +362,41 @@ class _TechnicianTaskCard extends StatelessWidget {
               Icon(Icons.chevron_right_rounded, size: 18, color: cs.onSurface.withAlpha(102)),
             ],
           ),
+          if (task.status == TaskStatus.pending || task.status == TaskStatus.inProgress) ...[
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: hasReport
+                        ? () => showTaskReportViewSheet(context, task.id)
+                        : () => showQuickReportSheet(context, task),
+                    icon: Icon(hasReport ? Icons.visibility_rounded : Icons.fact_check_rounded, size: 16),
+                    label: Text(hasReport ? 'Xem báo cáo' : 'Báo cáo'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: hasReport ? AppColors.info : AppColors.success,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => showQuickMeasurementSheet(context, task),
+                    icon: const Icon(Icons.straighten_rounded, size: 16),
+                    label: const Text('Chỉ số'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.info,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -350,9 +440,11 @@ class _CareActivitySheetState extends State<_CareActivitySheet> {
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final expCode = ExperimentHelper.getExperimentCode(widget.task.experimentId);
-    final stageName = ExperimentHelper.getStageName(widget.task.experimentId, widget.task.stageId);
-    final batchLabel = ExperimentHelper.getBatchLabel(widget.task.batchId);
+    final expCode = widget.task.experimentCode ?? ExperimentHelper.getExperimentCode(widget.task.experimentId);
+    final stageName = widget.task.experimentStageName ?? ExperimentHelper.getStageName(widget.task.experimentId, widget.task.stageId);
+    final batchLabel = (widget.task.batchCode != null && widget.task.batchCode!.isNotEmpty)
+        ? widget.task.batchCode!
+        : ExperimentHelper.getBatchLabel(widget.task.batchId);
 
     return Container(
       decoration: BoxDecoration(
@@ -386,7 +478,6 @@ class _CareActivitySheetState extends State<_CareActivitySheet> {
                   Text('Chi tiết công việc', style: tt.headlineSmall),
                   const SizedBox(height: AppSpacing.lg),
 
-                  // Experiment + Stage info
                   SNMSCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -457,7 +548,6 @@ class _CareActivitySheetState extends State<_CareActivitySheet> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // Time picker
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Container(
@@ -493,7 +583,6 @@ class _CareActivitySheetState extends State<_CareActivitySheet> {
                   ),
                   const SizedBox(height: AppSpacing.xl),
 
-                  // Photo section
                   _TechPhotoSection(
                     tt: tt, cs: cs,
                     photos: _photos,

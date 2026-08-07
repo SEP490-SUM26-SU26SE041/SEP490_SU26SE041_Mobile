@@ -7,8 +7,7 @@ import '../../../core/theme/app_radius.dart';
 import '../../../shared/models/growth_task_model.dart';
 import '../../../shared/models/experiment_model.dart';
 import '../../../shared/widgets/agritech_environment_background.dart';
-import '../../../mock/mock_users.dart';
-import '../../../mock/mock_experiments.dart';
+import '../../experiments/providers/experiment_provider.dart';
 
 class CreateTaskScreen extends ConsumerStatefulWidget {
   const CreateTaskScreen({super.key, this.experimentId});
@@ -38,16 +37,10 @@ class _CreateTaskScreenState extends ConsumerState<CreateTaskScreen> {
   void initState() {
     super.initState();
     _selectedExperimentId = widget.experimentId;
-    if (_selectedExperimentId != null) {
-      final exp = getExperimentById(_selectedExperimentId!);
-      if (exp != null && exp.stages.isNotEmpty) {
-        final activeStage = exp.stages.firstWhere(
-          (s) => s.status == StageStatus.active,
-          orElse: () => exp.stages.first,
-        );
-        _selectedStageId = activeStage.id;
-      }
-    }
+    // Pre-load experiments
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(experimentsProvider);
+    });
   }
 
   @override
@@ -57,27 +50,41 @@ class _CreateTaskScreenState extends ConsumerState<CreateTaskScreen> {
     super.dispose();
   }
 
+  // Watch experiments from API
+  List<ExperimentModel> get _availableExperiments {
+    final experiments = ref.watch(experimentsProvider);
+    return experiments.when(
+      data: (list) => list.where((e) => 
+        e.status == ExperimentStatus.active || 
+        e.status == ExperimentStatus.pending
+      ).toList(),
+      loading: () => [],
+      error: (_, __) => [],
+    );
+  }
+
+  // Watch stages from API for selected experiment
+  List<ExperimentStage> get _availableStages {
+    if (_selectedExperimentId == null) return [];
+    final stages = ref.watch(experimentStagesProvider(_selectedExperimentId!));
+    return stages.when(
+      data: (list) => list,
+      loading: () => [],
+      error: (_, __) => [],
+    );
+  }
+
   String? get _currentExperimentName {
     if (_selectedExperimentId == null) return null;
-    return getExperimentById(_selectedExperimentId!)?.title;
+    final experiments = _availableExperiments;
+    final exp = experiments.where((e) => e.id == _selectedExperimentId).firstOrNull;
+    return exp?.title;
   }
 
-  List<_ExperimentOption> get _availableExperiments {
-    return mockExperiments
-        .where((e) => e.status == ExperimentStatus.active || e.status == ExperimentStatus.pending)
-        .map((e) => _ExperimentOption(
-              id: e.id,
-              code: e.experimentCode,
-              title: e.title,
-            ))
-        .toList();
-  }
-
-  List<_StageOption> get _availableStages {
-    if (_selectedExperimentId == null) return [];
-    final exp = getExperimentById(_selectedExperimentId!);
-    if (exp == null) return [];
-    return exp.stages.map((s) => _StageOption(id: s.id, name: s.stageName)).toList();
+  ExperimentStage? get _selectedStage {
+    if (_selectedStageId == null) return null;
+    final stages = _availableStages;
+    return stages.where((s) => s.id == _selectedStageId).firstOrNull;
   }
 
   Future<void> _getAISuggestion() async {
@@ -94,33 +101,32 @@ class _CreateTaskScreenState extends ConsumerState<CreateTaskScreen> {
 
     await Future.delayed(const Duration(seconds: 2));
 
-    final candidates = mockUsers
-        .where((u) => u.role.name == 'technician' || u.role.name == 'student')
-        .map((u) {
-      final skillCount = u.skills.length;
-      final score = 60.0 + (skillCount * 8.0);
-      return AICandidateSuggestion(
-        userId: u.id,
-        fullName: u.fullName,
-        matchScore: score.clamp(0, 100),
-        currentTaskCount: u.role.name == 'student' ? 2 : 1,
-        reason: '${u.fullName} phù hợp với yêu cầu task "${_nameCtrl.text}"',
-      );
-    }).toList();
-
-    candidates.sort((a, b) => b.matchScore.compareTo(a.matchScore));
-
     setState(() {
-      _aiSuggestion = AITaskSuggestion(
-        suggestedAssigneeId: candidates.first.userId,
-        matchScore: candidates.first.matchScore,
-        reason: candidates.first.reason,
-        reviewStatus: 'suggested',
-        alternativeCandidates: candidates,
-      );
-      _selectedCandidate = candidates.first;
-      _showAISuggestion = true;
       _isLoadingSuggestion = false;
+      _aiSuggestion = AITaskSuggestion(
+        suggestedAssigneeId: 'tech-001',
+        matchScore: 92,
+        reason: 'Nguyễn Văn Kỹ Thuật có 5 năm kinh nghiệm trồng cà chua',
+        reviewStatus: 'suggested',
+        alternativeCandidates: [
+          AICandidateSuggestion(
+            userId: 'tech-001',
+            fullName: 'Nguyễn Văn Kỹ Thuật',
+            matchScore: 92,
+            currentTaskCount: 2,
+            reason: '5 năm kinh nghiệm trồng cà chua',
+          ),
+          AICandidateSuggestion(
+            userId: 'stu-001',
+            fullName: 'Trần Thị Sinh Viên',
+            matchScore: 78,
+            currentTaskCount: 1,
+            reason: 'Đang học năm 3, thực tập 6 tháng',
+          ),
+        ],
+      );
+      _selectedCandidate = _aiSuggestion!.alternativeCandidates!.first;
+      _showAISuggestion = true;
     });
   }
 
@@ -227,16 +233,6 @@ class _CreateTaskScreenState extends ConsumerState<CreateTaskScreen> {
                           setState(() {
                             _selectedExperimentId = id;
                             _selectedStageId = null;
-                            if (id != null) {
-                              final exp = getExperimentById(id);
-                              if (exp != null && exp.stages.isNotEmpty) {
-                                final activeStage = exp.stages.firstWhere(
-                                  (s) => s.status == StageStatus.active,
-                                  orElse: () => exp.stages.first,
-                                );
-                                _selectedStageId = activeStage.id;
-                              }
-                            }
                           });
                         },
                       ),
@@ -347,19 +343,6 @@ class _CreateTaskScreenState extends ConsumerState<CreateTaskScreen> {
   }
 }
 
-class _ExperimentOption {
-  final String id;
-  final String code;
-  final String title;
-  const _ExperimentOption({required this.id, required this.code, required this.title});
-}
-
-class _StageOption {
-  final String id;
-  final String name;
-  const _StageOption({required this.id, required this.name});
-}
-
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel({required this.label, this.required = false});
   final String label;
@@ -394,14 +377,18 @@ class _ExperimentSelector extends StatelessWidget {
     required this.selectedId,
     required this.onChanged,
   });
-  final List<_ExperimentOption> experiments;
+  final List<ExperimentModel> experiments;
   final String? selectedId;
   final void Function(String?) onChanged;
+
+  ExperimentModel? get _selectedExp {
+    return experiments.where((e) => e.id == selectedId).firstOrNull;
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final selected = experiments.where((e) => e.id == selectedId).firstOrNull;
+    final selected = _selectedExp;
 
     return GestureDetector(
       onTap: () => _showExperimentPicker(context),
@@ -438,7 +425,7 @@ class _ExperimentSelector extends StatelessWidget {
                 children: [
                   if (selected != null) ...[
                     Text(
-                      selected.code,
+                      selected.experimentCode,
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w700,
@@ -538,14 +525,14 @@ class _ExperimentSelector extends StatelessWidget {
                                 : AppColors.primary.withAlpha(20),
                             borderRadius: BorderRadius.circular(AppRadius.small),
                           ),
-                          child: Icon(
+                          child: const Icon(
                             Icons.science_rounded,
                             color: AppColors.primary,
                             size: 18,
                           ),
                         ),
                         title: Text(
-                          exp.code,
+                          exp.experimentCode,
                           style: Theme.of(context).textTheme.labelSmall?.copyWith(
                             color: AppColors.primary,
                             fontWeight: FontWeight.w700,
@@ -579,7 +566,7 @@ class _StageSelector extends StatelessWidget {
     required this.selectedId,
     required this.onChanged,
   });
-  final List<_StageOption> stages;
+  final List<ExperimentStage> stages;
   final String? selectedId;
   final void Function(String?) onChanged;
 
@@ -604,20 +591,38 @@ class _StageSelector extends StatelessWidget {
                 width: isSelected ? 1.5 : 1,
               ),
             ),
-            child: Text(
-              s.name,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: isSelected
-                    ? AppColors.primary
-                    : Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  s.stageName,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: isSelected
+                        ? AppColors.primary
+                        : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+                if (s.startDate != null && s.endDate != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '${_formatDate(s.startDate)} - ${_formatDate(s.endDate)}',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface.withAlpha(102),
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         );
       }).toList(),
     );
   }
+
+  String _formatDate(DateTime d) => '${d.day}/${d.month}';
 }
 
 class _PremiumTextField extends StatelessWidget {
@@ -688,6 +693,7 @@ class _TaskTypeSelector extends StatelessWidget {
     TaskType.fertilizing => Icons.eco_rounded,
     TaskType.observation => Icons.visibility_rounded,
     TaskType.inspection  => Icons.search_rounded,
+    TaskType.other       => Icons.more_horiz_rounded,
   };
 
   String _label(TaskType t) => switch (t) {
@@ -696,6 +702,7 @@ class _TaskTypeSelector extends StatelessWidget {
     TaskType.fertilizing => 'Bón phân',
     TaskType.observation => 'Quan sát',
     TaskType.inspection  => 'Kiểm tra',
+    TaskType.other       => 'Khác',
   };
 
   Color _color(TaskType t) => switch (t) {
@@ -704,6 +711,7 @@ class _TaskTypeSelector extends StatelessWidget {
     TaskType.fertilizing => AppColors.accent,
     TaskType.observation => AppColors.primary,
     TaskType.inspection  => AppColors.warning,
+    TaskType.other       => AppColors.textSecondaryLight,
   };
 
   @override

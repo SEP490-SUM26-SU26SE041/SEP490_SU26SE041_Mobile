@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'dart:math' as math;
 import 'package:go_router/go_router.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../core/theme/app_colors.dart';
@@ -23,19 +22,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _obscurePassword = true;
-  int _selectedQuickRole = -1;
   bool _redirectHandled = false;
 
   late AnimationController _staggerController;
   late Animation<double> _logoAnim;
   late Animation<double> _titleAnim;
   late Animation<double> _subtitleAnim;
-  late Animation<double> _badgeAnim;
   late Animation<double> _cardAnim;
-  late Animation<double> _demoAnim;
-
-  late AnimationController _ambientController;
-
   late AnimationController _plantController;
   late Animation<double> _plantAnim;
 
@@ -57,20 +50,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _subtitleAnim = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _staggerController, curve: const Interval(0.25, 0.45, curve: Curves.easeOut)),
     );
-    _badgeAnim = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _staggerController, curve: const Interval(0.35, 0.55, curve: Curves.easeOut)),
-    );
     _cardAnim = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(parent: _staggerController, curve: const Interval(0.50, 0.80, curve: Curves.easeOutCubic)),
     );
-    _demoAnim = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _staggerController, curve: const Interval(0.75, 1.0, curve: Curves.easeOut)),
-    );
-
-    _ambientController = AnimationController(
-      duration: const Duration(seconds: 4),
-      vsync: this,
-    )..repeat(reverse: true);
 
     _plantController = AnimationController(
       duration: const Duration(milliseconds: 800),
@@ -86,19 +68,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   @override
   void dispose() {
     _staggerController.dispose();
-    _ambientController.dispose();
     _plantController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
-  }
-
-  void _onQuickLogin(_QuickAccount acc) {
-    setState(() => _selectedQuickRole = acc.index);
-    _emailController.text = acc.email;
-    _passwordController.text = 'demo123';
-    _plantController.forward(from: 0);
-    _login();
   }
 
   void _login() {
@@ -110,8 +83,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       );
     }
   }
-
-  bool get _hasText => _emailController.text.isNotEmpty || _passwordController.text.isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -146,60 +117,39 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       body: AgritechEnvironmentBackground(
         mode: AgritechBackgroundMode.login,
         child: SafeArea(
-          child: AnimatedBuilder(
-            animation: _ambientController,
-            builder: (context, _) {
-              return Stack(
-                children: [
-                  // Ambient floating leaves — pass controller so AnimatedBuilder works
-                  ...List.generate(6, (i) => _FloatingLeaf(index: i, ambientCtrl: _ambientController)),
-
-                  Column(
-                    children: [
-                      // Top: Logo header
-                      Expanded(
-                        flex: 2,
-                        child: Center(
-                          child: AnimatedBuilder(
-                            animation: _logoAnim,
-                            builder: (context, _) => Opacity(
-                              opacity: _logoAnim.value,
-                              child: Transform.scale(
-                                scale: 0.7 + (_logoAnim.value * 0.3),
-                                child: _buildHeader(isDark),
-                              ),
-                            ),
-                          ),
-                        ),
+          child: Column(
+            children: [
+              // Top: Logo header
+              Expanded(
+                flex: 2,
+                child: Center(
+                  child: AnimatedBuilder(
+                    animation: _logoAnim,
+                    builder: (context, _) => Opacity(
+                      opacity: _logoAnim.value,
+                      child: Transform.scale(
+                        scale: 0.7 + (_logoAnim.value * 0.3),
+                        child: _buildHeader(isDark),
                       ),
-
-                      // Middle: Form card
-                      Expanded(
-                        flex: 3,
-                        child: AnimatedBuilder(
-                          animation: _cardAnim,
-                          builder: (context, _) => Opacity(
-                            opacity: _cardAnim.value,
-                            child: _buildCard(isDark, isLoading, isError, authState),
-                          ),
-                        ),
-                      ),
-
-                      // Bottom: Quick Access
-                      AnimatedBuilder(
-                        animation: _demoAnim,
-                        builder: (context, _) => Opacity(
-                          opacity: _demoAnim.value,
-                          child: _buildQuickAccess(),
-                        ),
-                      ),
-
-                      const SizedBox(height: AppSpacing.lg),
-                    ],
+                    ),
                   ),
-                ],
-              );
-            },
+                ),
+              ),
+
+              // Middle: Form card
+              Expanded(
+                flex: 3,
+                child: AnimatedBuilder(
+                  animation: _cardAnim,
+                  builder: (context, _) => Opacity(
+                    opacity: _cardAnim.value,
+                    child: _buildCard(isDark, isLoading, isError, authState),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.lg),
+            ],
           ),
         ),
       ),
@@ -550,257 +500,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildQuickAccess() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final tt = Theme.of(context).textTheme;
-    final accounts = [
-      _QuickAccount(index: 0, email: 'khoa.researcher@snms.vn', role: 'Researcher', color: AppColors.primary, icon: Icons.science_rounded),
-      _QuickAccount(index: 1, email: 'lan.student@snms.vn', role: 'Student', color: AppColors.info, icon: Icons.school_rounded),
-      _QuickAccount(index: 2, email: 'huong.tech@snms.vn', role: 'Technician', color: AppColors.warning, icon: Icons.build_rounded),
-      _QuickAccount(index: 3, email: 'duc.manager@snms.vn', role: 'Farm Manager', color: AppColors.success, icon: Icons.agriculture_rounded),
-      _QuickAccount(index: 4, email: 'admin@snms.vn', role: 'Admin', color: AppColors.accent, icon: Icons.admin_panel_settings_rounded),
-    ];
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-          child: Row(
-            children: [
-              Expanded(child: Container(height: 1, color: (isDark ? Colors.white : const Color(0xFF1B5E20)).withAlpha(51))),
-              const SizedBox(width: AppSpacing.sm),
-              Icon(Icons.flash_on_rounded, size: 14, color: AppColors.primary.withAlpha(153)),
-              const SizedBox(width: 4),
-              Text(
-                'Quick Access',
-                style: tt.labelSmall?.copyWith(
-                  color: (isDark ? Colors.white : const Color(0xFF1B5E20)).withAlpha(153),
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(child: Container(height: 1, color: (isDark ? Colors.white : const Color(0xFF1B5E20)).withAlpha(51))),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        SizedBox(
-          height: 90,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            itemCount: accounts.length,
-            separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
-            itemBuilder: (context, index) => _QuickAccessChip(
-              account: accounts[index],
-              isSelected: _selectedQuickRole == index,
-              onTap: () => _onQuickLogin(accounts[index]),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _QuickAccount {
-  final int index;
-  final String email;
-  final String role;
-  final Color color;
-  final IconData icon;
-  const _QuickAccount({
-    required this.index,
-    required this.email,
-    required this.role,
-    required this.color,
-    required this.icon,
-  });
-}
-
-class _QuickAccessChip extends StatefulWidget {
-  const _QuickAccessChip({required this.account, required this.isSelected, required this.onTap});
-  final _QuickAccount account;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  @override
-  State<_QuickAccessChip> createState() => _QuickAccessChipState();
-}
-
-class _QuickAccessChipState extends State<_QuickAccessChip> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _scaleAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 100));
-    _scaleAnim = Tween<double>(begin: 1.0, end: 0.95).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) => Transform.scale(
-        scale: _scaleAnim.value,
-        child: GestureDetector(
-          onTapDown: (_) => _controller.forward(),
-          onTapUp: (_) { _controller.reverse(); widget.onTap(); },
-          onTapCancel: () => _controller.reverse(),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: 100,
-            padding: const EdgeInsets.all(AppSpacing.sm),
-            decoration: BoxDecoration(
-              color: widget.isSelected
-                  ? widget.account.color.withAlpha(25)
-                  : (isDark ? AppColors.cardDark.withAlpha(220) : Colors.white.withAlpha(240)),
-              borderRadius: BorderRadius.circular(AppRadius.medium),
-              border: Border.all(
-                color: widget.isSelected
-                    ? widget.account.color.withAlpha(128)
-                    : (isDark ? AppColors.borderDark.withAlpha(102) : Colors.grey.shade200),
-                width: widget.isSelected ? 1.5 : 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: widget.account.color.withAlpha(widget.isSelected ? 20 : 10),
-                  blurRadius: widget.isSelected ? 12 : 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: widget.account.color.withAlpha(widget.isSelected ? 35 : 20),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    widget.account.icon,
-                    size: 20,
-                    color: widget.account.color,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  widget.account.role,
-                  style: tt.labelSmall?.copyWith(
-                    color: widget.isSelected
-                        ? widget.account.color
-                        : (isDark ? Colors.white.withAlpha(179) : const Color(0xFF1B5E20).withAlpha(179)),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                ),
-                Text(
-                  widget.account.email,
-                  style: tt.bodySmall?.copyWith(
-                    color: (isDark ? Colors.white : const Color(0xFF1B5E20)).withAlpha(102),
-                    fontSize: 8,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FloatingLeaf extends StatefulWidget {
-  const _FloatingLeaf({required this.index, required this.ambientCtrl});
-  final int index;
-  final AnimationController ambientCtrl;
-
-  @override
-  State<_FloatingLeaf> createState() => _FloatingLeafState();
-}
-
-class _FloatingLeafState extends State<_FloatingLeaf> {
-  late double _sx;
-  late double _sy;
-  late double _sz;
-
-  static double _lcg(int seed) {
-    return ((seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _sx = _lcg(widget.index);
-    _sy = _lcg(widget.index + 7) / 2.5;
-    _sz = 12.0 + _lcg(widget.index + 14) * 8;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final icons = [
-      Icons.eco_rounded,
-      Icons.grass_rounded,
-      Icons.spa_rounded,
-      Icons.park_rounded,
-      Icons.local_florist_rounded,
-      Icons.eco_outlined,
-    ];
-
-    return AnimatedBuilder(
-      animation: widget.ambientCtrl,
-      builder: (context, _) {
-        final t = widget.ambientCtrl.value;
-        final pi = 3.141592653589793;
-        final y = _sy + t * 0.12;
-        final x = _sx + math.sin(t * pi * 2 + widget.index) * 0.025;
-        final alpha = (0.3 * (0.5 + t * 0.5) * 255).round().clamp(0, 255);
-        final angle = t * pi * 0.3 + widget.index * 0.5;
-
-        final size = MediaQuery.of(context).size;
-        return Positioned(
-          left: size.width * x,
-          top: size.height * y,
-          child: Opacity(
-            opacity: (0.3 * (0.5 + t * 0.5)).clamp(0.0, 1.0),
-            child: Transform.rotate(
-              angle: angle,
-              child: Icon(
-                icons[widget.index % icons.length],
-                size: _sz,
-                color: AppColors.primary.withAlpha(alpha),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

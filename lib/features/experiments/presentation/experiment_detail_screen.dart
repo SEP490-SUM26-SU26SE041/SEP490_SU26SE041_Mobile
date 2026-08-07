@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:intl/intl.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_radius.dart';
+import '../../../core/utils/date_utils.dart';
 import '../../../shared/models/experiment_model.dart';
-import '../../../shared/models/growth_task_model.dart';
+import '../../../shared/models/growth_task_model.dart' as internal;
 import '../../../shared/widgets/staggered_list_item.dart';
 import '../../experiments/providers/experiment_provider.dart';
+import '../../tasks/providers/task_providers.dart';
 
 class ExperimentDetailScreen extends ConsumerStatefulWidget {
   const ExperimentDetailScreen({super.key, required this.id, this.analyticsTab = false});
@@ -29,13 +29,36 @@ class _ExperimentDetailScreenState extends ConsumerState<ExperimentDetailScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
-    if (widget.analyticsTab) {
-      _tabController.index = 3; // Results tab (0-indexed)
+    _tabController.addListener(_onTabChanged);
+    // Pre-load all experiment data to trigger API calls immediately
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(experimentDetailProvider(widget.id));
+      ref.read(experimentStagesProvider(widget.id));
+      ref.read(experimentGroupsProvider(widget.id));
+      ref.read(experimentDesignProvider(widget.id));
+      ref.read(experimentTasksProvider(widget.id));
+    });
+  }
+
+  void _onTabChanged() {
+    if (_tabController.indexIsChanging) return;
+    final index = _tabController.index;
+    // Pre-load data for the selected tab
+    if (index == 1) {
+      // Design tab
+      ref.read(experimentDesignProvider(widget.id));
+    } else if (index == 2) {
+      // Groups tab
+      ref.read(experimentGroupsProvider(widget.id));
+    } else if (index == 4) {
+      // Tasks tab
+      ref.read(experimentTasksProvider(widget.id));
     }
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
   }
@@ -66,11 +89,11 @@ class _ExperimentDetailScreenState extends ConsumerState<ExperimentDetailScreen>
             body: TabBarView(
               controller: _tabController,
               children: [
-                _OverviewTab(experiment: exp),
-                _DesignTab(experiment: exp),
-                _GroupsTab(experiment: exp),
-                _ResultsTab(experiment: exp),
-                _TasksTab(experiment: exp),
+                _OverviewTab(experimentId: widget.id),
+                _DesignTab(experimentId: widget.id),
+                _GroupsTab(experimentId: widget.id),
+                _ResultsTab(experimentId: widget.id),
+                _TasksTab(experimentId: widget.id),
               ],
             ),
           ),
@@ -236,7 +259,7 @@ class _PremiumSliverAppBar extends StatelessWidget {
     return '$days days';
   }
 
-  String _fmtDate(DateTime dt) => DateFormat('dd/MM/yyyy').format(dt);
+  String _fmtDate(DateTime dt) => formatDate(dt);
 
   Color _statusColor(ExperimentStatus s) => switch (s) {
     ExperimentStatus.active    => AppColors.experimentActive,
@@ -348,6 +371,11 @@ class _ProgressRing extends StatelessWidget {
   final double progress;
   final Color color;
 
+  double get safeProgress {
+    if (progress.isNaN || progress.isInfinite) return 0.0;
+    return progress.clamp(0.0, 1.0);
+  }
+
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -360,14 +388,14 @@ class _ProgressRing extends StatelessWidget {
             width: 48,
             height: 48,
             child: CircularProgressIndicator(
-              value: progress,
+              value: safeProgress,
               strokeWidth: 3.5,
               backgroundColor: color.withAlpha(25),
               valueColor: AlwaysStoppedAnimation(color),
             ),
           ),
           Text(
-            '${(progress * 100).round()}%',
+            '${(safeProgress * 100).round()}%',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               fontWeight: FontWeight.w800,
               color: color,
@@ -421,12 +449,16 @@ class _InfoChipData extends StatelessWidget {
 
 // ─── TAB 1: OVERVIEW ────────────────────────────────────────────────────────
 
-class _OverviewTab extends StatelessWidget {
-  const _OverviewTab({required this.experiment});
-  final ExperimentModel experiment;
+class _OverviewTab extends ConsumerWidget {
+  const _OverviewTab({required this.experimentId});
+  final String experimentId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final stages = ref.watch(experimentStagesProvider(experimentId));
+    final groups = ref.watch(experimentGroupsProvider(experimentId));
+    final design = ref.watch(experimentDesignProvider(experimentId));
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       physics: const BouncingScrollPhysics(),
@@ -436,28 +468,28 @@ class _OverviewTab extends StatelessWidget {
           // Research Goal
           StaggeredListItem(
             index: 0,
-            child: _ResearchGoalCard(experiment: experiment),
+            child: _ResearchGoalCard(experimentId: experimentId),
           ),
           const SizedBox(height: AppSpacing.lg),
 
-          // Design KPIs 2x2
+          // Design KPIs 2x2 - from separate API
           StaggeredListItem(
             index: 1,
-            child: _DesignKPIGrid(experiment: experiment),
+            child: _DesignKPIGrid(experimentId: experimentId, design: design),
           ),
           const SizedBox(height: AppSpacing.lg),
 
-          // Analysis Summary
+          // Stages Progress - from separate API
           StaggeredListItem(
             index: 2,
-            child: _AnalysisSummaryCard(experiment: experiment),
+            child: _StagesProgressCard(stages: stages),
           ),
           const SizedBox(height: AppSpacing.lg),
 
-          // Quick Groups Preview
+          // Quick Groups Preview - from separate API
           StaggeredListItem(
             index: 3,
-            child: _QuickGroupsPreview(experiment: experiment),
+            child: _QuickGroupsPreview(experimentId: experimentId, groups: groups),
           ),
           const SizedBox(height: AppSpacing.huge),
         ],
@@ -466,87 +498,106 @@ class _OverviewTab extends StatelessWidget {
   }
 }
 
-class _ResearchGoalCard extends StatelessWidget {
-  const _ResearchGoalCard({required this.experiment});
-  final ExperimentModel experiment;
+class _ResearchGoalCard extends ConsumerWidget {
+  const _ResearchGoalCard({required this.experimentId});
+  final String experimentId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final experiment = ref.watch(experimentDetailProvider(experimentId));
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.cardDark : AppColors.cardLight,
-        borderRadius: AppRadius.heroRadius,
-        border: Border.all(
-          color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 20 : 8),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: AppColors.greenGradient(context),
-                  borderRadius: BorderRadius.circular(AppRadius.small),
-                ),
-                child: const Icon(Icons.auto_stories_rounded, color: Colors.white, size: 22),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Research Goal',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Primary Objective',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+
+    return experiment.when(
+      data: (exp) {
+        if (exp == null) {
+          return const SizedBox.shrink();
+        }
+        return Container(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.cardDark : AppColors.cardLight,
+            borderRadius: AppRadius.heroRadius,
+            border: Border.all(
+              color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(isDark ? 20 : 8),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            experiment.objective,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withAlpha(179),
-              height: 1.6,
-            ),
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: AppColors.greenGradient(context),
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
+                    child: const Icon(Icons.auto_stories_rounded, color: Colors.white, size: 22),
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Mục tiêu nghiên cứu',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          exp.title,
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                exp.objective,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface.withAlpha(179),
+                  height: 1.6,
+                ),
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
-        ],
+        );
+      },
+      loading: () => Container(
+        height: 150,
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.cardDark : AppColors.cardLight,
+          borderRadius: AppRadius.heroRadius,
+        ),
+        child: const Center(child: CircularProgressIndicator()),
       ),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }
 
 class _DesignKPIGrid extends StatelessWidget {
-  const _DesignKPIGrid({required this.experiment});
-  final ExperimentModel experiment;
+  const _DesignKPIGrid({required this.experimentId, required this.design});
+  final String experimentId;
+  final AsyncValue<ExperimentDesign?> design;
 
   @override
   Widget build(BuildContext context) {
@@ -565,7 +616,7 @@ class _DesignKPIGrid extends StatelessWidget {
             ),
             const SizedBox(width: AppSpacing.sm),
             Text(
-              'Experiment Design',
+              'Thiết kế thực nghiệm',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: Theme.of(context).colorScheme.onSurface,
@@ -574,46 +625,202 @@ class _DesignKPIGrid extends StatelessWidget {
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        GridView.count(
-          crossAxisCount: 2,
-          mainAxisSpacing: AppSpacing.md,
-          crossAxisSpacing: AppSpacing.md,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          childAspectRatio: 1.6,
+        design.when(
+          data: (d) => GridView.count(
+            crossAxisCount: 2,
+            mainAxisSpacing: AppSpacing.md,
+            crossAxisSpacing: AppSpacing.md,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            childAspectRatio: 1.6,
+            children: [
+              _DesignKPICard(
+                index: 0,
+                icon: Icons.grid_view_rounded,
+                label: 'Loại thiết kế',
+                value: d?.designTypeLabel ?? '-',
+                color: AppColors.primary,
+              ),
+              _DesignKPICard(
+                index: 1,
+                icon: Icons.grass_rounded,
+                label: 'Cây/lô',
+                value: '${d?.designParameters?.plantsPerPlot ?? '-'}',
+                unit: 'cây',
+                color: AppColors.success,
+              ),
+              _DesignKPICard(
+                index: 2,
+                icon: Icons.copy_rounded,
+                label: 'Số lần lặp',
+                value: '${d?.replicationCount ?? '-'}',
+                color: AppColors.info,
+              ),
+              _DesignKPICard(
+                index: 3,
+                icon: Icons.group_work_rounded,
+                label: 'Nhóm xử lý',
+                value: '${d?.designParameters?.treatments ?? '-'}',
+                color: AppColors.accent,
+              ),
+            ],
+          ),
+          loading: () => const SizedBox(
+            height: 200,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (_, __) => const SizedBox(height: 200),
+        ),
+      ],
+    );
+  }
+}
+
+class _StagesProgressCard extends StatelessWidget {
+  const _StagesProgressCard({required this.stages});
+  final AsyncValue<List<ExperimentStage>> stages;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            _DesignKPICard(
-              index: 0,
-              icon: Icons.grid_view_rounded,
-              label: 'Design Type',
-              value: experiment.design.designTypeLabel,
-              color: AppColors.primary,
+            Container(
+              width: 3,
+              height: 18,
+              decoration: BoxDecoration(
+                color: AppColors.success,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-            _DesignKPICard(
-              index: 1,
-              icon: Icons.grass_rounded,
-              label: 'Sample Size',
-              value: '${experiment.design.sampleSize}',
-              unit: 'plants',
-              color: AppColors.success,
-            ),
-            _DesignKPICard(
-              index: 2,
-              icon: Icons.copy_rounded,
-              label: 'Replications',
-              value: '${experiment.design.replicationCount}',
-              color: AppColors.info,
-            ),
-            _DesignKPICard(
-              index: 3,
-              icon: Icons.group_work_rounded,
-              label: 'Treatment Groups',
-              value: '${experiment.design.treatmentCount}',
-              color: AppColors.accent,
+            const SizedBox(width: AppSpacing.sm),
+            Text(
+              'Tiến độ giai đoạn',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
             ),
           ],
         ),
+        const SizedBox(height: AppSpacing.md),
+        stages.when(
+          data: (stageList) {
+            if (stageList.isEmpty) {
+              return Container(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.medium),
+                ),
+                child: const Center(child: Text('Chưa có giai đoạn')),
+              );
+            }
+            return Column(
+              children: stageList.asMap().entries.map((entry) {
+                final index = entry.key;
+                final stage = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: _StageProgressItem(stage: stage, index: index),
+                );
+              }).toList(),
+            );
+          },
+          loading: () => const SizedBox(
+            height: 100,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (_, __) => const SizedBox(height: 100),
+        ),
       ],
+    );
+  }
+}
+
+class _StageProgressItem extends StatelessWidget {
+  const _StageProgressItem({required this.stage, required this.index});
+  final ExperimentStage stage;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final statusColor = stage.status == StageStatus.completed
+        ? AppColors.success
+        : stage.status == StageStatus.active
+            ? AppColors.primary
+            : AppColors.warning;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.cardDark : AppColors.cardLight,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        border: Border.all(color: statusColor.withAlpha(77)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: statusColor.withAlpha(20),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              stage.status == StageStatus.completed
+                  ? Icons.check_circle_rounded
+                  : Icons.schedule_rounded,
+              size: 18,
+              color: statusColor,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  stage.stageName,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  stage.stageTypeLabel,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: statusColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.xs,
+            ),
+            decoration: BoxDecoration(
+              color: statusColor.withAlpha(20),
+              borderRadius: BorderRadius.circular(AppRadius.small),
+            ),
+            child: Text(
+              stage.status == StageStatus.completed
+                  ? 'Hoàn thành'
+                  : stage.status == StageStatus.active
+                      ? 'Đang thực hiện'
+                      : 'Sắp tới',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: statusColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -752,100 +959,10 @@ class _DesignKPICardState extends State<_DesignKPICard>
   }
 }
 
-class _AnalysisSummaryCard extends StatelessWidget {
-  const _AnalysisSummaryCard({required this.experiment});
-  final ExperimentModel experiment;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hasAnalysis = experiment.design.analysisPlan != null;
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.cardDark : AppColors.cardLight,
-        borderRadius: AppRadius.heroRadius,
-        border: Border.all(
-          color: AppColors.aiInsight.withAlpha(51),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.aiInsight.withAlpha(isDark ? 10 : 8),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.aiInsight.withAlpha(20),
-              borderRadius: BorderRadius.circular(AppRadius.small),
-            ),
-            child: const Icon(Icons.auto_awesome_rounded, color: AppColors.aiInsight, size: 24),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Analysis Plan',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  hasAnalysis ? experiment.design.analysisPlan! : 'ANOVA + Tukey HSD',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                  ),
-                ),
-                if (experiment.design.evaluationCriteria != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    experiment.design.evaluationCriteria!,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: AppColors.aiInsight.withAlpha(179),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
-            ),
-            decoration: BoxDecoration(
-              color: AppColors.aiInsight.withAlpha(20),
-              borderRadius: BorderRadius.circular(AppRadius.small),
-            ),
-            child: Text(
-              'Details',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: AppColors.aiInsight,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _QuickGroupsPreview extends StatelessWidget {
-  const _QuickGroupsPreview({required this.experiment});
-  final ExperimentModel experiment;
+  const _QuickGroupsPreview({required this.experimentId, required this.groups});
+  final String experimentId;
+  final AsyncValue<List<ExperimentGroup>> groups;
 
   @override
   Widget build(BuildContext context) {
@@ -864,34 +981,49 @@ class _QuickGroupsPreview extends StatelessWidget {
             ),
             const SizedBox(width: AppSpacing.sm),
             Text(
-              'Experiment Groups',
+              'Nhóm thí nghiệm',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
-            const Spacer(),
-            Text(
-              '${experiment.groups.length} groups',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withAlpha(102),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        ...experiment.groups.asMap().entries.map((entry) {
-          final index = entry.key;
-          final group = entry.value;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: StaggeredListItem(
-              index: 4 + index,
-              child: _ResearchGroupCard(group: group),
-            ),
-          );
-        }),
+        groups.when(
+          data: (groupList) {
+            if (groupList.isEmpty) {
+              return Container(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.medium),
+                ),
+                child: const Center(
+                  child: Text('Chưa có nhóm thí nghiệm'),
+                ),
+              );
+            }
+            return Column(
+              children: groupList.asMap().entries.map((entry) {
+                final index = entry.key;
+                final group = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: StaggeredListItem(
+                    index: 4 + index,
+                    child: _ResearchGroupCard(group: group),
+                  ),
+                );
+              }).toList(),
+            );
+          },
+          loading: () => const SizedBox(
+            height: 100,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (_, __) => const SizedBox(height: 100),
+        ),
       ],
     );
   }
@@ -1081,125 +1213,71 @@ class _GroupMiniStat extends StatelessWidget {
 
 // ─── TAB 2: DESIGN ───────────────────────────────────────────────────────────
 
-class _DesignTab extends StatelessWidget {
-  const _DesignTab({required this.experiment});
-  final ExperimentModel experiment;
-
-  bool get _isDesignReady => switch (experiment.status) {
-    ExperimentStatus.active    => true,
-    ExperimentStatus.completed => true,
-    ExperimentStatus.paused   => true,
-    ExperimentStatus.draft    => false,
-    ExperimentStatus.planning => false,
-    ExperimentStatus.pending  => false,
-  };
+class _DesignTab extends ConsumerWidget {
+  const _DesignTab({required this.experimentId});
+  final String experimentId;
 
   @override
-  Widget build(BuildContext context) {
-    if (!_isDesignReady) {
-      return _PendingDesignPlaceholder(experiment: experiment);
-    }
+  Widget build(BuildContext context, WidgetRef ref) {
+    final designAsync = ref.watch(experimentDesignProvider(experimentId));
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      physics: const BouncingScrollPhysics(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Pending Approval Banner (if status = pending, design ready but awaiting FM approval)
-          if (experiment.status == ExperimentStatus.pending)
-            StaggeredListItem(
-              index: 0,
-              child: _ApprovalPendingBanner(),
-            ),
-
-          // Full design details as premium list
-          StaggeredListItem(
-            index: experiment.status == ExperimentStatus.pending ? 1 : 0,
-            child: _DesignDetailSection(experiment: experiment),
-          ),
-          const SizedBox(height: AppSpacing.md),
-
-          // Create Design Button (for active experiments without full design)
-          if (experiment.status == ExperimentStatus.active || experiment.status == ExperimentStatus.pending)
-            StaggeredListItem(
-              index: experiment.status == ExperimentStatus.pending ? 2 : 1,
-              child: _CreateDesignButton(experiment: experiment),
-            ),
-          const SizedBox(height: AppSpacing.lg),
-
-          // Evaluation
-          if (experiment.design.evaluationCriteria != null)
-            StaggeredListItem(
-              index: experiment.status == ExperimentStatus.pending ? 2 : 1,
-              child: _EvaluationCard(criteria: experiment.design.evaluationCriteria!),
-            ),
-          const SizedBox(height: AppSpacing.huge),
-        ],
-      ),
-    );
-  }
-}
-
-class _ApprovalPendingBanner extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withAlpha(25),
-        borderRadius: AppRadius.heroRadius,
-        border: Border.all(color: AppColors.warning.withAlpha(77)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.hourglass_top_rounded, color: AppColors.warning, size: 20),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              'Thiết kế đã hoàn tất — đang chờ Farm Manager phê duyệt để bắt đầu thí nghiệm.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: AppColors.warning,
-                fontWeight: FontWeight.w500,
+    return designAsync.when(
+      data: (design) {
+        if (design == null) {
+          return const _PendingDesignPlaceholder();
+        }
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          physics: const BouncingScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Full design details from API
+              StaggeredListItem(
+                index: 0,
+                child: _DesignDetailSection(design: design),
               ),
-            ),
+              const SizedBox(height: AppSpacing.huge),
+            ],
           ),
-        ],
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.grey),
+              const SizedBox(height: AppSpacing.md),
+              Text('Không thể tải thiết kế: $e',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              ElevatedButton.icon(
+                onPressed: () => ref.invalidate(experimentDesignProvider(experimentId)),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Thử lại'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
 class _PendingDesignPlaceholder extends StatelessWidget {
-  const _PendingDesignPlaceholder({required this.experiment});
-  final ExperimentModel experiment;
+  const _PendingDesignPlaceholder();
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final statusLabel = switch (experiment.status) {
-      ExperimentStatus.draft    => 'Bản nháp',
-      ExperimentStatus.planning => 'Đang lập kế hoạch',
-      ExperimentStatus.pending  => 'Chờ phê duyệt',
-      _                        => 'Chưa được duyệt',
-    };
-    final statusIcon = switch (experiment.status) {
-      ExperimentStatus.draft    => Icons.edit_note_rounded,
-      ExperimentStatus.planning => Icons.design_services_rounded,
-      ExperimentStatus.pending  => Icons.pending_actions_rounded,
-      _                        => Icons.hourglass_empty_rounded,
-    };
-    final statusColor = switch (experiment.status) {
-      ExperimentStatus.draft    => AppColors.neutral,
-      ExperimentStatus.planning => AppColors.info,
-      ExperimentStatus.pending  => AppColors.warning,
-      _                        => AppColors.neutral,
-    };
-
     return Center(
-      child: SingleChildScrollView(
+      child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xl),
-        physics: const BouncingScrollPhysics(),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1207,86 +1285,28 @@ class _PendingDesignPlaceholder extends StatelessWidget {
               width: 80,
               height: 80,
               decoration: BoxDecoration(
-                color: statusColor.withAlpha(25),
+                color: AppColors.warning.withAlpha(25),
                 shape: BoxShape.circle,
-                border: Border.all(color: statusColor.withAlpha(77), width: 2),
+                border: Border.all(color: AppColors.warning.withAlpha(77), width: 2),
               ),
-              child: Icon(statusIcon, color: statusColor, size: 36),
+              child: const Icon(Icons.hourglass_empty_rounded, color: AppColors.warning, size: 36),
             ),
             const SizedBox(height: AppSpacing.lg),
             Text(
-              'Thiết kế thực nghiệm',
+              'Chưa có thiết kế',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
-              decoration: BoxDecoration(
-                color: statusColor.withAlpha(25),
-                borderRadius: BorderRadius.circular(AppRadius.small),
-                border: Border.all(color: statusColor.withAlpha(77)),
-              ),
-              child: Text(
-                statusLabel,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: statusColor,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.cardDark : AppColors.cardLight,
-                borderRadius: AppRadius.heroRadius,
-                border: Border.all(color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128)),
-              ),
-              child: Column(
-                children: [
-                  _PlaceholderRow(
-                    icon: Icons.grid_view_rounded,
-                    label: 'Thiết kế thực nghiệm',
-                    hint: 'CRD / RCBD / Factorial',
-                  ),
-                  const Divider(height: AppSpacing.lg),
-                  _PlaceholderRow(
-                    icon: Icons.grass_rounded,
-                    label: 'Cỡ mẫu',
-                    hint: 'Số cây trong mỗi nhóm',
-                  ),
-                  const Divider(height: AppSpacing.lg),
-                  _PlaceholderRow(
-                    icon: Icons.copy_rounded,
-                    label: 'Số lần lặp lại',
-                    hint: 'Replication count',
-                  ),
-                  const Divider(height: AppSpacing.lg),
-                  _PlaceholderRow(
-                    icon: Icons.group_work_rounded,
-                    label: 'Nhóm xử lý',
-                    hint: 'Control vs Treatment',
-                  ),
-                  const Divider(height: AppSpacing.lg),
-                  _PlaceholderRow(
-                    icon: Icons.auto_awesome_rounded,
-                    label: 'Kế hoạch phân tích',
-                    hint: 'ANOVA, Tukey HSD...',
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl),
             Text(
-              'Thiết kế chi tiết sẽ được hiển thị sau khi Farm Manager phê duyệt yêu cầu thí nghiệm.',
+              'Thiết kế chi tiết của thực nghiệm chưa được tạo. Vui lòng tạo thiết kế trên web hoặc liên hệ Farm Manager.',
+              textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
+                color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
                 height: 1.5,
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -1295,52 +1315,15 @@ class _PendingDesignPlaceholder extends StatelessWidget {
   }
 }
 
-class _PlaceholderRow extends StatelessWidget {
-  const _PlaceholderRow({required this.icon, required this.label, required this.hint});
-  final IconData icon;
-  final String label;
-  final String hint;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: AppColors.neutral.withAlpha(153)),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                hint,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurface.withAlpha(77),
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _DesignDetailSection extends StatelessWidget {
-  const _DesignDetailSection({required this.experiment});
-  final ExperimentModel experiment;
+  const _DesignDetailSection({required this.design});
+  final ExperimentDesign design;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final params = design.designParameters;
+    
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
@@ -1373,7 +1356,7 @@ class _DesignDetailSection extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.md),
               Text(
-                'Design Specification',
+                'Thông số thiết kế',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: Theme.of(context).colorScheme.onSurface,
@@ -1382,32 +1365,36 @@ class _DesignDetailSection extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.xl),
-          _DetailRow(label: 'Design Type', value: experiment.design.designTypeLabel, icon: Icons.grid_view_rounded),
+          _DetailRow(label: 'Loại thiết kế', value: design.designType, icon: Icons.grid_view_rounded),
           _DetailDivider(),
-          _DetailRow(label: 'Sample Size', value: '${experiment.design.sampleSize} plants', icon: Icons.grass_rounded),
+          _DetailRow(label: 'Phương pháp', value: design.randomizationMethod, icon: Icons.shuffle_rounded),
           _DetailDivider(),
-          _DetailRow(label: 'Replications', value: '${experiment.design.replicationCount}', icon: Icons.copy_rounded),
-          _DetailDivider(),
-          _DetailRow(label: 'Treatment Groups', value: '${experiment.design.treatmentCount}', icon: Icons.group_work_rounded),
-          if (experiment.design.observationFrequencyDays != null) ...[
+          _DetailRow(label: 'Số lần lặp', value: '${design.replicationCount}', icon: Icons.copy_rounded),
+          if (params != null) ...[
             _DetailDivider(),
-            _DetailRow(label: 'Observation Frequency', value: 'Every ${experiment.design.observationFrequencyDays} days', icon: Icons.visibility_rounded),
+            _DetailRow(label: 'Số nhóm xử lý', value: '${params.treatments ?? "-"}', icon: Icons.group_work_rounded),
+            _DetailDivider(),
+            _DetailRow(label: 'Cây/lô', value: '${params.plantsPerPlot ?? "-"}', icon: Icons.grass_rounded),
+            _DetailDivider(),
+            _DetailRow(label: 'Diện tích lô', value: '${params.plotArea ?? "-"} m²', icon: Icons.square_foot_rounded),
+            if (params.spacing != null) ...[
+              _DetailDivider(),
+              _DetailRow(label: 'Khoảng cách hàng', value: params.spacing!.row ?? '-', icon: Icons.straighten_rounded),
+              _DetailDivider(),
+              _DetailRow(label: 'Khoảng cách cây', value: params.spacing!.plant ?? '-', icon: Icons.straighten_rounded),
+            ],
+            if (params.bufferZone != null) ...[
+              _DetailDivider(),
+              _DetailRow(label: 'Vùng đệm', value: params.bufferZone!, icon: Icons.warning_amber_rounded),
+            ],
+            if (params.randomSeed != null) ...[
+              _DetailDivider(),
+              _DetailRow(label: 'Random Seed', value: '${params.randomSeed}', icon: Icons.tag_rounded),
+            ],
           ],
-          if (experiment.design.measurementFrequencyDays != null) ...[
+          if (params?.notes != null && params!.notes!.isNotEmpty) ...[
             _DetailDivider(),
-            _DetailRow(label: 'Measurement Frequency', value: 'Every ${experiment.design.measurementFrequencyDays} days', icon: Icons.straighten_rounded),
-          ],
-          if (experiment.requiredArea != null) ...[
-            _DetailDivider(),
-            _DetailRow(label: 'Required Area', value: '${experiment.requiredArea} m²', icon: Icons.square_foot_rounded),
-          ],
-          if (experiment.plantQuantity != null) ...[
-            _DetailDivider(),
-            _DetailRow(label: 'Total Plants', value: '${experiment.plantQuantity} plants', icon: Icons.eco_rounded),
-          ],
-          if (experiment.design.analysisPlan != null) ...[
-            _DetailDivider(),
-            _DetailRow(label: 'Analysis Plan', value: experiment.design.analysisPlan!, icon: Icons.auto_awesome_rounded),
+            _DetailRow(label: 'Ghi chú', value: params.notes!, icon: Icons.note_rounded),
           ],
         ],
       ),
@@ -1464,86 +1451,60 @@ class _DetailDivider extends StatelessWidget {
   }
 }
 
-class _EvaluationCard extends StatelessWidget {
-  const _EvaluationCard({required this.criteria});
-  final String criteria;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.cardDark : AppColors.cardLight,
-        borderRadius: AppRadius.heroRadius,
-        border: Border.all(color: AppColors.warning.withAlpha(51)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 20 : 8),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.warning.withAlpha(25),
-              borderRadius: BorderRadius.circular(AppRadius.small),
-            ),
-            child: Icon(Icons.checklist_rounded, color: AppColors.warning, size: 22),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Evaluation Criteria',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  criteria,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── TAB 3: GROUPS ───────────────────────────────────────────────────────────
 
-class _GroupsTab extends StatelessWidget {
-  const _GroupsTab({required this.experiment});
-  final ExperimentModel experiment;
+class _GroupsTab extends ConsumerWidget {
+  const _GroupsTab({required this.experimentId});
+  final String experimentId;
 
   @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      physics: const BouncingScrollPhysics(),
-      itemCount: experiment.groups.length,
-      separatorBuilder: (_, i) => const SizedBox(height: AppSpacing.md),
-      itemBuilder: (context, index) {
-        final group = experiment.groups[index];
-        return StaggeredListItem(
-          index: index,
-          child: _FullGroupCard(group: group),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final groupsAsync = ref.watch(experimentGroupsProvider(experimentId));
+
+    return groupsAsync.when(
+      data: (groups) {
+        if (groups.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.xl),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.group_off_rounded, size: 64, color: Colors.grey[400]),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    'Chưa có nhóm thí nghiệm',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Các nhóm thí nghiệm sẽ được hiển thị sau khi được tạo.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          physics: const BouncingScrollPhysics(),
+          itemCount: groups.length,
+          separatorBuilder: (_, i) => const SizedBox(height: AppSpacing.md),
+          itemBuilder: (context, index) {
+            final group = groups[index];
+            return StaggeredListItem(
+              index: index,
+              child: _FullGroupCard(group: group),
+            );
+          },
         );
       },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text('Lỗi: $e')),
     );
   }
 }
@@ -1762,12 +1723,15 @@ class _TreatmentMetric extends StatelessWidget {
 
 // ─── TAB 4: RESULTS ─────────────────────────────────────────────────────────
 
-class _ResultsTab extends StatelessWidget {
-  const _ResultsTab({required this.experiment});
-  final ExperimentModel experiment;
+class _ResultsTab extends ConsumerWidget {
+  const _ResultsTab({required this.experimentId});
+  final String experimentId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final stages = ref.watch(experimentStagesProvider(experimentId));
+    final groups = ref.watch(experimentGroupsProvider(experimentId));
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       physics: const BouncingScrollPhysics(),
@@ -1776,50 +1740,44 @@ class _ResultsTab extends StatelessWidget {
         children: [
           StaggeredListItem(
             index: 0,
-            child: _ResultsIntro(),
+            child: _ResultsIntro(stages: stages, groups: groups),
           ),
           const SizedBox(height: AppSpacing.lg),
-          StaggeredListItem(
-            index: 1,
-            child: _ComparisonMetricRow(
-              label: 'Chiều cao trung bình',
-              controlValue: '18.4 cm',
-              treatmentValue: '21.2 cm',
-              icon: Icons.straighten_rounded,
-              color: AppColors.primary,
-            ),
+          // Show groups from API /experiments/{id}/groups
+          groups.when(
+            data: (groupList) {
+              if (groupList.isEmpty) return const SizedBox.shrink();
+              return Column(
+                children: groupList.asMap().entries.map((e) => Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                  child: StaggeredListItem(
+                    index: e.key + 1,
+                    child: _GroupResultCard(group: e.value, index: e.key),
+                  ),
+                )).toList(),
+              );
+            },
+            loading: () => const SizedBox(height: 100, child: Center(child: CircularProgressIndicator())),
+            error: (_, __) => const SizedBox.shrink(),
           ),
-          const SizedBox(height: AppSpacing.md),
-          StaggeredListItem(
-            index: 2,
-            child: _ComparisonMetricRow(
-              label: 'Số lá trung bình',
-              controlValue: '6.2',
-              treatmentValue: '7.8',
-              icon: Icons.eco_rounded,
-              color: AppColors.success,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          StaggeredListItem(
-            index: 3,
-            child: _ComparisonMetricRow(
-              label: 'Tỷ lệ sống',
-              controlValue: '82%',
-              treatmentValue: '94%',
-              icon: Icons.favorite_rounded,
-              color: AppColors.warning,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          StaggeredListItem(
-            index: 4,
-            child: _GrowthChartCard(),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          StaggeredListItem(
-            index: 5,
-            child: _GroupsComparisonRow(experiment: experiment),
+          // Show completed stages from API /experiments/{id}/stages
+          stages.when(
+            data: (stageList) {
+              final completed = stageList.where((s) => s.status == StageStatus.completed).toList();
+              if (completed.isEmpty) return const SizedBox.shrink();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: AppSpacing.lg),
+                  StaggeredListItem(
+                    index: 10,
+                    child: _StagesResultsSection(stages: completed),
+                  ),
+                ],
+              );
+            },
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
           ),
           const SizedBox(height: AppSpacing.huge),
         ],
@@ -1829,9 +1787,16 @@ class _ResultsTab extends StatelessWidget {
 }
 
 class _ResultsIntro extends StatelessWidget {
+  const _ResultsIntro({required this.stages, required this.groups});
+  final AsyncValue<List<ExperimentStage>> stages;
+  final AsyncValue<List<ExperimentGroup>> groups;
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final completedCount = stages.valueOrNull?.where((s) => s.status == StageStatus.completed).length ?? 0;
+    final groupCount = groups.valueOrNull?.length ?? 0;
+    
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
@@ -1863,7 +1828,7 @@ class _ResultsIntro extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Groups Comparison',
+                  'Kết quả thí nghiệm',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: Theme.of(context).colorScheme.onSurface,
@@ -1871,9 +1836,9 @@ class _ResultsIntro extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'So sánh hiệu quả giữa Nhóm Đối Chứng và Nhóm Thực Nghiệm',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
+                  '$groupCount nhóm | $completedCount giai đoạn hoàn thành',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: AppColors.primary,
                   ),
                 ),
               ],
@@ -1885,39 +1850,25 @@ class _ResultsIntro extends StatelessWidget {
   }
 }
 
-class _ComparisonMetricRow extends StatelessWidget {
-  const _ComparisonMetricRow({
-    required this.label,
-    required this.controlValue,
-    required this.treatmentValue,
-    required this.icon,
-    required this.color,
-  });
-
-  final String label;
-  final String controlValue;
-  final String treatmentValue;
-  final IconData icon;
-  final Color color;
+class _GroupResultCard extends StatelessWidget {
+  const _GroupResultCard({required this.group, required this.index});
+  final ExperimentGroup group;
+  final int index;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tt = Theme.of(context).textTheme;
+    final bgCard = isDark ? AppColors.cardDark : AppColors.cardLight;
+    final groupColor = index == 0 ? AppColors.primary : AppColors.success;
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.cardDark : AppColors.cardLight,
+        color: bgCard,
         borderRadius: BorderRadius.circular(AppRadius.medium),
-        border: Border.all(
-          color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 20 : 8),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128)),
+        boxShadow: [BoxShadow(color: Colors.black.withAlpha(isDark ? 20 : 8), blurRadius: 16, offset: const Offset(0, 4))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1925,173 +1876,170 @@ class _ComparisonMetricRow extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: color.withAlpha(25),
-                  borderRadius: BorderRadius.circular(AppRadius.small),
-                ),
-                child: Icon(icon, size: 18, color: color),
+                width: 36, height: 36,
+                decoration: BoxDecoration(color: groupColor.withAlpha(20), borderRadius: BorderRadius.circular(10)),
+                child: Icon(group.groupType == GroupType.control ? Icons.science_outlined : Icons.science_rounded, size: 18, color: groupColor),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
-                child: Text(
-                  label,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(group.groupName, style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                    Text(group.groupType == GroupType.control ? 'Nhóm đối chứng' : 'Nhóm thực nghiệm', style: tt.labelSmall?.copyWith(color: groupColor)),
+                  ],
                 ),
               ),
+              if (group.sampleSize > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+                  decoration: BoxDecoration(color: groupColor.withAlpha(20), borderRadius: BorderRadius.circular(AppRadius.small)),
+                  child: Text('n=${group.sampleSize}', style: tt.labelSmall?.copyWith(color: groupColor, fontWeight: FontWeight.w600)),
+                ),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: _ResultValueBox(
-                  label: 'Control',
-                  value: controlValue,
-                  color: AppColors.info,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: _ResultValueBox(
-                  label: 'Treatment',
-                  value: treatmentValue,
-                  color: color,
-                  highlight: true,
-                ),
-              ),
-            ],
-          ),
+          if (group.description != null && group.description!.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(group.description!, style: tt.bodySmall?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
+          ],
         ],
       ),
     );
   }
 }
 
-class _ResultValueBox extends StatelessWidget {
-  const _ResultValueBox({
-    required this.label,
-    required this.value,
-    required this.color,
-    this.highlight = false,
-  });
-
-  final String label;
-  final String value;
-  final Color color;
-  final bool highlight;
+class _StagesResultsSection extends StatelessWidget {
+  const _StagesResultsSection({required this.stages});
+  final List<ExperimentStage> stages;
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: highlight
-            ? color.withAlpha(15)
-            : (isDark ? AppColors.surfaceDark : AppColors.backgroundLight).withAlpha(128),
-        borderRadius: BorderRadius.circular(AppRadius.small),
-        border: Border.all(
-          color: highlight ? color.withAlpha(51) : (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(77),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
+    final tt = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Kết quả theo giai đoạn', style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: AppSpacing.md),
+        ...stages.asMap().entries.map((entry) {
+          final index = entry.key;
+          final stage = entry.value;
+          return Padding(
+            padding: EdgeInsets.only(bottom: index < stages.length - 1 ? AppSpacing.md : 0),
+            child: _StageResultCard(stage: stage),
+          );
+        }),
+      ],
     );
   }
 }
 
-class _GrowthChartCard extends StatelessWidget {
+class _StageResultCard extends StatelessWidget {
+  const _StageResultCard({required this.stage});
+  final ExperimentStage stage;
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tt = Theme.of(context).textTheme;
+    final bgCard = isDark ? AppColors.cardDark : AppColors.cardLight;
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.cardDark : AppColors.cardLight,
-        borderRadius: AppRadius.heroRadius,
-        border: Border.all(
-          color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 20 : 8),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: bgCard,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        border: Border.all(color: AppColors.success.withAlpha(77)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(
-                'Growth Curve',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurface,
+              Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(color: AppColors.success.withAlpha(20), borderRadius: BorderRadius.circular(8)),
+                child: const Icon(Icons.check_circle_rounded, size: 18, color: AppColors.success),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(stage.stageName, style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                    Text(stage.stageTypeLabel, style: tt.labelSmall?.copyWith(color: AppColors.success)),
+                  ],
                 ),
               ),
-              const Spacer(),
-              _ChartLegend(label: 'Control', color: AppColors.info),
-              const SizedBox(width: AppSpacing.md),
-              _ChartLegend(label: 'Treatment', color: AppColors.primary),
+              Text('Giai đoạn ${stage.stageOrder}', style: tt.labelSmall?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          SizedBox(
-            height: 200,
-            child: _PremiumLineChart(tt: Theme.of(context).textTheme, isDark: isDark),
-          ),
+          if (stage.result?.summary.isNotEmpty == true) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(stage.result!.summary, style: tt.bodySmall?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
+          ],
         ],
       ),
     );
   }
 }
 
-class _ChartLegend extends StatelessWidget {
-  const _ChartLegend({required this.label, required this.color});
-  final String label;
-  final Color color;
+// ─── TAB 5: TASKS (Premium Smart Task List với API thật) ─────────────────
+
+class _TasksTab extends ConsumerStatefulWidget {
+  const _TasksTab({required this.experimentId});
+  final String experimentId;
+
+  @override
+  ConsumerState<_TasksTab> createState() => _TasksTabState();
+}
+
+class _TasksTabState extends ConsumerState<_TasksTab> {
+  TaskFilter _activeFilter = TaskFilter.all;
+  int? _overdueDays;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final tasks = ref.watch(experimentTasksProvider(widget.experimentId));
+
+    return Column(
       children: [
-        Container(width: 20, height: 2.5, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurface.withAlpha(102),
-            fontWeight: FontWeight.w500,
+        // KPI Stats
+        tasks.when(
+          data: (taskList) => _ExpTaskStatsBar(tasks: taskList),
+          loading: () => const SizedBox(height: 100),
+          error: (_, __) => const SizedBox.shrink(),
+        ),
+        // Filter Chips
+        _ExpFilterChipsRow(
+          activeFilter: _activeFilter,
+          onFilterChanged: (f) => setState(() {
+            _activeFilter = f;
+            _overdueDays = null; // Reset overdue filter when changing main filter
+          }),
+        ),
+        // Overdue date filter (khi chọn filter quá hạn)
+        if (_activeFilter == TaskFilter.overdue)
+          _ExpOverdueDateFilter(
+            overdueDays: _overdueDays,
+            onChanged: (days) => setState(() => _overdueDays = days),
+          ),
+        // Task List
+        Expanded(
+          child: tasks.when(
+            data: (taskList) {
+              if (taskList.isEmpty) {
+                return _TasksEmptyState(message: 'Chưa có công việc nào');
+              }
+              return _ExpSmartTaskList(
+                tasks: taskList,
+                filter: _activeFilter,
+                experimentId: widget.experimentId,
+                overdueDays: _overdueDays,
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Center(child: Text('Lỗi: $e')),
           ),
         ),
       ],
@@ -2099,340 +2047,190 @@ class _ChartLegend extends StatelessWidget {
   }
 }
 
-class _PremiumLineChart extends StatelessWidget {
-  const _PremiumLineChart({required this.tt, required this.isDark});
-  final TextTheme tt;
+enum TaskFilter { all, overdue, today, upcoming, completed }
+
+// Overdue Date Filter cho Experiment Tasks Tab
+class _ExpOverdueDateFilter extends StatelessWidget {
+  const _ExpOverdueDateFilter({required this.overdueDays, required this.onChanged});
+  final int? overdueDays;
+  final ValueChanged<int?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          _ExpDateChip(label: 'Tất cả', isSelected: overdueDays == null, onTap: () => onChanged(null), isDark: isDark),
+          const SizedBox(width: 8),
+          _ExpDateChip(label: '1 ngày', isSelected: overdueDays == 1, onTap: () => onChanged(1), isDark: isDark),
+          const SizedBox(width: 8),
+          _ExpDateChip(label: '3 ngày', isSelected: overdueDays == 3, onTap: () => onChanged(3), isDark: isDark),
+          const SizedBox(width: 8),
+          _ExpDateChip(label: '7 ngày', isSelected: overdueDays == 7, onTap: () => onChanged(7), isDark: isDark),
+          const SizedBox(width: 8),
+          _ExpDateChip(label: '14 ngày', isSelected: overdueDays == 14, onTap: () => onChanged(14), isDark: isDark),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExpDateChip extends StatelessWidget {
+  const _ExpDateChip({required this.label, required this.isSelected, required this.onTap, required this.isDark});
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
   final bool isDark;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return LineChart(
-      LineChartData(
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          horizontalInterval: 5,
-          getDrawingHorizontalLine: (value) => FlLine(
-            color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128),
-            strokeWidth: 0.5,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.error : (isDark ? AppColors.surfaceDark : AppColors.surfaceLight),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: isSelected ? AppColors.error : Colors.grey.withAlpha(60)),
           ),
-        ),
-        titlesData: FlTitlesData(
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 32,
-              interval: 5,
-              getTitlesWidget: (value, meta) => Text(
-                '${value.toInt()}',
-                style: tt.labelSmall?.copyWith(color: cs.onSurface.withAlpha(102)),
-              ),
-            ),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 24,
-              interval: 7,
-              getTitlesWidget: (value, meta) => Text(
-                'D${value.toInt()}',
-                style: tt.labelSmall?.copyWith(color: cs.onSurface.withAlpha(102)),
-              ),
-            ),
-          ),
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        ),
-        borderData: FlBorderData(show: false),
-        lineBarsData: [
-          LineChartBarData(
-            spots: const [
-              FlSpot(0, 4), FlSpot(5, 8), FlSpot(10, 11), FlSpot(15, 14),
-              FlSpot(20, 16), FlSpot(25, 17.5), FlSpot(30, 18.4),
-            ],
-            isCurved: true,
-            color: AppColors.info,
-            barWidth: 2.5,
-            dotData: const FlDotData(show: false),
-            belowBarData: BarAreaData(
-              show: true,
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  AppColors.info.withAlpha(40),
-                  AppColors.info.withAlpha(0),
-                ],
-              ),
-            ),
-          ),
-          LineChartBarData(
-            spots: const [
-              FlSpot(0, 4), FlSpot(5, 9), FlSpot(10, 13), FlSpot(15, 16),
-              FlSpot(20, 18.5), FlSpot(25, 20), FlSpot(30, 21.2),
-            ],
-            isCurved: true,
-            color: AppColors.primary,
-            barWidth: 2.5,
-            dotData: const FlDotData(show: false),
-            belowBarData: BarAreaData(
-              show: true,
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  AppColors.primary.withAlpha(40),
-                  AppColors.primary.withAlpha(0),
-                ],
-              ),
-            ),
-          ),
-        ],
-        lineTouchData: LineTouchData(
-          touchTooltipData: LineTouchTooltipData(
-            getTooltipItems: (touchedSpots) {
-              return touchedSpots.map((spot) => LineTooltipItem(
-                '${spot.y.toStringAsFixed(1)} cm',
-                TextStyle(
-                  color: spot.bar.color,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                ),
-              )).toList();
-            },
-          ),
+          child: Text(label, style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: isSelected ? Colors.white : Colors.grey,
+            fontWeight: FontWeight.w600,
+          )),
         ),
       ),
     );
   }
 }
 
-class _GroupsComparisonRow extends StatelessWidget {
-  const _GroupsComparisonRow({required this.experiment});
-  final ExperimentModel experiment;
+// Section Header for Experiment Tasks
+class _ExpSectionHeader extends StatelessWidget {
+  const _ExpSectionHeader({required this.label, required this.count, this.isOverdue = false, this.isCompleted = false});
+  final String label;
+  final int count;
+  final bool isOverdue;
+  final bool isCompleted;
+
+  Color get _color {
+    if (isOverdue) return AppColors.error;
+    if (isCompleted) return AppColors.success;
+    if (label == 'Hôm nay') return AppColors.warning;
+    if (label == 'Ngày mai') return AppColors.info;
+    return AppColors.primary;
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (experiment.groups.isEmpty) return const SizedBox.shrink();
-    final control = experiment.groups.first;
-    final treatment = experiment.groups.length > 1 ? experiment.groups.last : control;
+    final tt = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Row(
       children: [
-        Expanded(
-          child: _CompactGroupResult(
-            groupName: control.groupName,
-            type: 'Control',
-            water: '${control.cultivationMethod.wateringRule.amount}ml',
-            fertilizer: control.cultivationMethod.fertilizingRule.fertilizerName,
-            color: AppColors.info,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: _color.withAlpha(20),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _color.withAlpha(50)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isOverdue) ...[Icon(Icons.warning_amber_rounded, size: 14, color: _color), const SizedBox(width: 4)],
+              if (isCompleted) ...[Icon(Icons.check_circle_rounded, size: 14, color: _color), const SizedBox(width: 4)],
+              Text(label, style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w700, color: _color)),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: _color.withAlpha(30), borderRadius: BorderRadius.circular(10)),
+                child: Text('$count', style: tt.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: _color)),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: _CompactGroupResult(
-            groupName: treatment.groupName,
-            type: 'Treatment',
-            water: '${treatment.cultivationMethod.wateringRule.amount}ml',
-            fertilizer: treatment.cultivationMethod.fertilizingRule.fertilizerName,
-            color: AppColors.primary,
-          ),
-        ),
+        const SizedBox(width: 12),
+        Expanded(child: Container(height: 1, decoration: BoxDecoration(gradient: LinearGradient(colors: [_color.withAlpha(60), _color.withAlpha(0)])))),
       ],
     );
   }
 }
 
-class _CompactGroupResult extends StatelessWidget {
-  const _CompactGroupResult({
-    required this.groupName,
-    required this.type,
-    required this.water,
-    required this.fertilizer,
-    required this.color,
-  });
-
-  final String groupName;
-  final String type;
-  final String water;
-  final String fertilizer;
-  final Color color;
+class _ExpTaskStatsBar extends StatelessWidget {
+  const _ExpTaskStatsBar({required this.tasks});
+  final List<internal.TaskModel> tasks;
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final weekLater = today.add(const Duration(days: 7));
+
+    int overdueCount = 0, todayCount = 0, upcomingCount = 0, completedCount = 0;
+
+    for (final task in tasks) {
+      final dueDate = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+      if (task.status == internal.TaskStatus.completed) {
+        completedCount++;
+      } else if (dueDate.isBefore(today)) {
+        overdueCount++;
+      } else if (dueDate == today) {
+        todayCount++;
+      } else if (dueDate.isBefore(weekLater)) {
+        upcomingCount++;
+      }
+    }
+
     return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: color.withAlpha(15),
-        borderRadius: BorderRadius.circular(AppRadius.medium),
-        border: Border.all(color: color.withAlpha(51)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  groupName,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            type,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '$water water',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
-            ),
-          ),
-          Text(
-            fertilizer,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
-            ),
-          ),
+          _ExpStatTile(label: 'Quá hạn', count: overdueCount, color: AppColors.error, icon: Icons.warning_rounded),
+          const SizedBox(width: 8),
+          _ExpStatTile(label: 'Hôm nay', count: todayCount, color: AppColors.warning, icon: Icons.today_rounded),
+          const SizedBox(width: 8),
+          _ExpStatTile(label: 'Sắp tới', count: upcomingCount, color: AppColors.info, icon: Icons.schedule_rounded),
+          const SizedBox(width: 8),
+          _ExpStatTile(label: 'Xong', count: completedCount, color: AppColors.success, icon: Icons.check_circle_rounded),
         ],
       ),
     );
   }
 }
 
-// ─── TAB 5: TASKS ─────────────────────────────────────────────────────────────
+class _ExpStatTile extends StatelessWidget {
+  const _ExpStatTile({required this.label, required this.count, required this.color, required this.icon});
+  final String label;
+  final int count;
+  final Color color;
+  final IconData icon;
 
-class _TasksTab extends ConsumerWidget {
-  const _TasksTab({required this.experiment});
-  final ExperimentModel experiment;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final tasks = ref.watch(tasksProvider);
-    final tt = Theme.of(context).textTheme;
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.sm,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Tasks',
-                style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              ElevatedButton.icon(
-                onPressed: () => context.push('/experiments/${experiment.id}/create-task'),
-                icon: const Icon(Icons.add_rounded, size: 16),
-                label: const Text('New Task'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.md,
-                    vertical: AppSpacing.sm,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadius.medium),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: tasks.when(
-            data: (taskList) {
-              final filtered = taskList.where((t) => t.experimentId == experiment.id).toList();
-              if (filtered.isEmpty) {
-                return _TasksEmptyState();
-              }
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg,
-                ),
-                physics: const BouncingScrollPhysics(),
-                itemCount: filtered.length,
-                separatorBuilder: (_, i) => const SizedBox(height: AppSpacing.md),
-                itemBuilder: (context, index) {
-                  return StaggeredListItem(
-                    index: index,
-                    child: _ExpTaskCard(task: filtered[index]),
-                  );
-                },
-              );
-            },
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => Center(child: Text('Error: $e')),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _TasksEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final tt = Theme.of(context).textTheme;
-    final bgCard = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Center(
+    return Expanded(
       child: Container(
-        margin: const EdgeInsets.all(AppSpacing.xl),
-        padding: const EdgeInsets.all(AppSpacing.xxl),
+        padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: bgCard,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80),
-          ),
+          color: color.withAlpha(15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withAlpha(40)),
         ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.task_alt_outlined, size: 56,
-                color: (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight).withAlpha(77)),
-            const SizedBox(height: AppSpacing.lg),
-            Text(
-              'Chưa có task nào',
-              style: tt.titleMedium?.copyWith(
-                color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Tạo task để theo dõi tiến độ thực nghiệm',
-              style: tt.bodySmall?.copyWith(
-                color: (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight).withAlpha(153),
-              ),
-              textAlign: TextAlign.center,
-            ),
+            Icon(icon, size: 18, color: color),
+            const SizedBox(height: 2),
+            Text('$count', style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: color)),
+            Text(label, style: tt.labelSmall?.copyWith(fontSize: 9, color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
           ],
         ),
       ),
@@ -2440,166 +2238,346 @@ class _TasksEmptyState extends StatelessWidget {
   }
 }
 
-class _ExpTaskCard extends StatelessWidget {
-  const _ExpTaskCard({required this.task});
-  final TaskModel task;
+class _ExpFilterChipsRow extends StatelessWidget {
+  const _ExpFilterChipsRow({required this.activeFilter, required this.onFilterChanged});
+  final TaskFilter activeFilter;
+  final ValueChanged<TaskFilter> onFilterChanged;
 
-  Color get _statusColor => switch (task.status) {
-    TaskStatus.pending    => AppColors.warning,
-    TaskStatus.inProgress => AppColors.info,
-    TaskStatus.completed => AppColors.success,
-    TaskStatus.overdue   => AppColors.error,
-  };
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          _ExpFilterChip(label: 'Tất cả', isSelected: activeFilter == TaskFilter.all, onTap: () => onFilterChanged(TaskFilter.all)),
+          const SizedBox(width: 8),
+          _ExpFilterChip(label: 'Quá hạn', isSelected: activeFilter == TaskFilter.overdue, onTap: () => onFilterChanged(TaskFilter.overdue), color: AppColors.error),
+          const SizedBox(width: 8),
+          _ExpFilterChip(label: 'Hôm nay', isSelected: activeFilter == TaskFilter.today, onTap: () => onFilterChanged(TaskFilter.today), color: AppColors.warning),
+          const SizedBox(width: 8),
+          _ExpFilterChip(label: 'Sắp tới', isSelected: activeFilter == TaskFilter.upcoming, onTap: () => onFilterChanged(TaskFilter.upcoming), color: AppColors.info),
+          const SizedBox(width: 8),
+          _ExpFilterChip(label: 'Hoàn thành', isSelected: activeFilter == TaskFilter.completed, onTap: () => onFilterChanged(TaskFilter.completed), color: AppColors.success),
+        ],
+      ),
+    );
+  }
+}
 
-  IconData get _typeIcon => switch (task.taskType) {
-    TaskType.planting     => Icons.grass_rounded,
-    TaskType.watering    => Icons.water_drop_rounded,
-    TaskType.fertilizing => Icons.eco_rounded,
-    TaskType.observation => Icons.visibility_rounded,
-    TaskType.inspection  => Icons.search_rounded,
-  };
-
-  String get _statusLabel => switch (task.status) {
-    TaskStatus.pending    => 'Chờ xử lý',
-    TaskStatus.inProgress => 'Đang thực hiện',
-    TaskStatus.completed => 'Hoàn thành',
-    TaskStatus.overdue   => 'Quá hạn',
-  };
+class _ExpFilterChip extends StatelessWidget {
+  const _ExpFilterChip({required this.label, required this.isSelected, required this.onTap, this.color});
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final activeColor = color ?? AppColors.primary;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? activeColor : (isDark ? AppColors.surfaceDark : AppColors.surfaceLight),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: isSelected ? activeColor : (isDark ? AppColors.borderDark : AppColors.borderLight)),
+          ),
+          child: Text(label, style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: isSelected ? Colors.white : (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight),
+            fontWeight: FontWeight.w600,
+          )),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExpSmartTaskList extends StatelessWidget {
+  const _ExpSmartTaskList({required this.tasks, required this.filter, required this.experimentId, this.overdueDays});
+  final List<internal.TaskModel> tasks;
+  final TaskFilter filter;
+  final String experimentId;
+  final int? overdueDays;
+
+  List<internal.TaskModel> get _filtered {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final weekLater = today.add(const Duration(days: 7));
+
+    switch (filter) {
+      case TaskFilter.all: return tasks;
+      case TaskFilter.today:
+        final tomorrow = today.add(const Duration(days: 1));
+        return tasks.where((t) {
+          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          return due == today || due == tomorrow;
+        }).toList();
+      case TaskFilter.upcoming:
+        return tasks.where((t) {
+          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          return due.isAfter(today) && due.isBefore(weekLater);
+        }).toList();
+      case TaskFilter.overdue:
+        return tasks.where((t) {
+          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          if (due.isBefore(today) && t.status != internal.TaskStatus.completed) {
+            if (overdueDays != null) {
+              final daysDiff = today.difference(due).inDays;
+              return daysDiff <= overdueDays!;
+            }
+            return true;
+          }
+          return false;
+        }).toList();
+      case TaskFilter.completed:
+        return tasks.where((t) => t.status == internal.TaskStatus.completed).toList();
+    }
+  }
+
+  Map<String, List<internal.TaskModel>> get _grouped {
+    final Map<String, List<internal.TaskModel>> grouped = {};
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+
+    for (final task in _filtered) {
+      final dueDate = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+      String key;
+
+      if (task.status == internal.TaskStatus.completed) {
+        key = 'Hoàn thành';
+      } else if (dueDate.isBefore(today)) {
+        final daysOverdue = today.difference(dueDate).inDays;
+        if (daysOverdue == 1) {
+          key = 'Quá hạn 1 ngày';
+        } else if (daysOverdue <= 3) {
+          key = 'Quá hạn 1-3 ngày';
+        } else if (daysOverdue <= 7) {
+          key = 'Quá hạn 3-7 ngày';
+        } else {
+          key = 'Quá hạn $daysOverdue ngày';
+        }
+      } else if (dueDate == today) {
+        key = 'Hôm nay';
+      } else if (dueDate == tomorrow) {
+        key = 'Ngày mai';
+      } else {
+        key = 'Sắp tới';
+      }
+
+      grouped.putIfAbsent(key, () => []).add(task);
+    }
+    return grouped;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filtered;
+    if (filtered.isEmpty) {
+      return Center(child: Text('Không có công việc phù hợp'));
+    }
+
+    final grouped = _grouped;
+    final sections = grouped.keys.toList();
+
+    // Sort sections in logical order
+    sections.sort((a, b) {
+      final order = ['Quá hạn 1 ngày', 'Quá hạn 1-3 ngày', 'Quá hạn 3-7 ngày', 'Hôm nay', 'Ngày mai', 'Sắp tới', 'Hoàn thành'];
+      final aIndex = order.indexWhere((o) => b.contains(o));
+      final bIndex = order.indexWhere((o) => a.contains(o));
+      if (aIndex != -1 && bIndex != -1) return aIndex.compareTo(bIndex);
+      if (aIndex != -1) return -1;
+      if (bIndex != -1) return 1;
+      return a.compareTo(b);
+    });
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      itemCount: sections.length,
+      itemBuilder: (context, i) {
+        final section = sections[i];
+        final sectionTasks = grouped[section]!;
+        final isOverdueSection = section.contains('Quá hạn');
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ExpSectionHeader(
+              label: section,
+              count: sectionTasks.length,
+              isOverdue: isOverdueSection,
+              isCompleted: section == 'Hoàn thành',
+            ),
+            const SizedBox(height: 10),
+            ...sectionTasks.map((task) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _ExpPremiumTaskCard(
+                task: task,
+                onReportTap: task.status == internal.TaskStatus.completed ? () => _showReport(context, task) : null,
+              ),
+            )),
+            const SizedBox(height: 8),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showReport(BuildContext context, internal.TaskModel task) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => _ExpTaskReportSheet(task: task),
+    );
+  }
+}
+
+class _ExpPremiumTaskCard extends StatelessWidget {
+  const _ExpPremiumTaskCard({required this.task, this.onReportTap});
+  final internal.TaskModel task;
+  final VoidCallback? onReportTap;
+
+  Color get _statusColor => switch (task.status) {
+    internal.TaskStatus.pending => AppColors.warning,
+    internal.TaskStatus.inProgress => AppColors.info,
+    internal.TaskStatus.completed => AppColors.success,
+    internal.TaskStatus.overdue => AppColors.error,
+  };
+
+  IconData get _typeIcon => switch (task.taskType) {
+    internal.TaskType.planting => Icons.grass_rounded,
+    internal.TaskType.watering => Icons.water_drop_rounded,
+    internal.TaskType.fertilizing => Icons.science_rounded,
+    internal.TaskType.observation => Icons.visibility_rounded,
+    internal.TaskType.inspection => Icons.search_rounded,
+    internal.TaskType.other => Icons.more_horiz_rounded,
+  };
+
+  String get _statusLabel => switch (task.status) {
+    internal.TaskStatus.pending => 'Chờ xử lý',
+    internal.TaskStatus.inProgress => 'Đang thực hiện',
+    internal.TaskStatus.completed => 'Hoàn thành',
+    internal.TaskStatus.overdue => 'Quá hạn',
+  };
+
+  bool get _isOverdue => task.status == internal.TaskStatus.overdue ||
+      (task.status != internal.TaskStatus.completed && task.dueDate.isBefore(DateTime.now()));
+
+  @override
+  Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgCard = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
     final textPrimary = isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
     final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
-    final borderColor = isDark ? AppColors.borderDark : AppColors.borderLight;
-
-    final isOverdue = task.status == TaskStatus.overdue ||
-        (task.status != TaskStatus.completed && task.dueDate.isBefore(DateTime.now()));
 
     return Container(
       decoration: BoxDecoration(
         color: bgCard,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isOverdue ? AppColors.error.withAlpha(60) : borderColor.withAlpha(80),
-          width: 0.8,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 22 : 10),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _isOverdue ? AppColors.error.withAlpha(50) : (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80)),
+        boxShadow: [BoxShadow(color: Colors.black.withAlpha(isDark ? 20 : 8), blurRadius: 12, offset: const Offset(0, 4))],
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          onTap: () => _showExpTaskDetail(context),
-          borderRadius: BorderRadius.circular(18),
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          onTap: () => _showDetail(context),
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
                   children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: _statusColor.withAlpha(20),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: _statusColor.withAlpha(30), width: 0.8),
-                      ),
-                      child: Icon(_typeIcon, size: 22, color: _statusColor),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            task.taskName,
-                            style: tt.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: textPrimary,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Container(
+                          width: 44, height: 44,
+                          decoration: BoxDecoration(color: _statusColor.withAlpha(20), borderRadius: BorderRadius.circular(12)),
+                          child: Icon(_typeIcon, size: 22, color: _statusColor),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(task.taskName, style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: textPrimary), maxLines: 2, overflow: TextOverflow.ellipsis),
+                              if (task.experimentStageName != null) ...[
+                                const SizedBox(height: 2),
+                                Text(task.experimentStageName!, style: tt.bodySmall?.copyWith(color: AppColors.primary.withAlpha(200), fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              ],
+                            ],
                           ),
-                          if (task.description != null && task.description!.isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            Text(
-                              task.description!,
-                              style: tt.bodySmall?.copyWith(
-                                color: textSecondary,
-                                height: 1.3,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ],
-                      ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(color: _statusColor.withAlpha(20), borderRadius: BorderRadius.circular(8)),
+                          child: Text(_statusLabel, style: tt.labelSmall?.copyWith(color: _statusColor, fontWeight: FontWeight.w600)),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _statusColor.withAlpha(20),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: _statusColor.withAlpha(35), width: 0.8),
-                      ),
-                      child: Text(
-                        _statusLabel,
-                        style: tt.labelSmall?.copyWith(
-                          color: _statusColor,
-                          fontWeight: FontWeight.w600,
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8, runSpacing: 6,
+                      children: [
+                        _ExpMetaTag(icon: Icons.person_outline_rounded, label: task.assignedTo ?? 'Chưa giao', color: AppColors.primary),
+                        _ExpMetaTag(icon: _isOverdue ? Icons.warning_amber_rounded : Icons.schedule_rounded, label: _formatDueDate(task.dueDate), color: _isOverdue ? AppColors.error : textSecondary),
+                        if (task.batchCode != null) _ExpMetaTag(icon: Icons.inventory_2_outlined, label: task.batchCode!, color: AppColors.success),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Report button for completed tasks
+              if (task.status == internal.TaskStatus.completed && onReportTap != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withAlpha(10),
+                    borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+                    border: Border(top: BorderSide(color: AppColors.success.withAlpha(30))),
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: onReportTap,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.assessment_rounded, size: 18, color: AppColors.success),
+                            const SizedBox(width: 8),
+                            Text('Xem báo cáo', style: tt.labelMedium?.copyWith(color: AppColors.success, fontWeight: FontWeight.w600)),
+                            const SizedBox(width: 4),
+                            Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppColors.success),
+                          ],
                         ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: AppSpacing.md),
-                // Meta row
-                Wrap(
-                  spacing: AppSpacing.md,
-                  runSpacing: 8,
-                  children: [
-                    if (task.assignedTo != null && task.assignedTo!.isNotEmpty)
-                      _ExpMetaChip(
-                        icon: Icons.person_outline_rounded,
-                        label: task.assignedTo!,
-                        color: AppColors.primary,
-                      ),
-                    _ExpMetaChip(
-                      icon: isOverdue ? Icons.warning_amber_rounded : Icons.calendar_today_outlined,
-                      label: 'Hạn: ${_formatDate(task.dueDate)}',
-                      color: isOverdue ? AppColors.error : textSecondary,
-                    ),
-                    if (task.stageId != null && task.stageId!.isNotEmpty)
-                      _ExpMetaChip(
-                        icon: Icons.layers_outlined,
-                        label: task.stageId!,
-                        color: AppColors.info,
-                      ),
-                  ],
-                ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  void _showExpTaskDetail(BuildContext context) {
+  void _showDetail(BuildContext context) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -2608,8 +2586,376 @@ class _ExpTaskCard extends StatelessWidget {
     );
   }
 
-  String _formatDate(DateTime dt) {
-    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+  String _formatDueDate(DateTime dt) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final due = DateTime(dt.year, dt.month, dt.day);
+    if (due == today) return 'Hôm nay';
+    if (due == today.add(const Duration(days: 1))) return 'Ngày mai';
+    if (due.isBefore(today)) return 'Quá hạn';
+    return '${dt.day}/${dt.month}';
+  }
+}
+
+class _ExpMetaTag extends StatelessWidget {
+  const _ExpMetaTag({required this.icon, required this.label, required this.color});
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: color.withAlpha(15), borderRadius: BorderRadius.circular(6)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color.withAlpha(180)),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(label, style: tt.labelSmall?.copyWith(color: color.withAlpha(200), fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExpTaskDetailSheet extends StatelessWidget {
+  const _ExpTaskDetailSheet({required this.task});
+  final internal.TaskModel task;
+
+  Color get _statusColor => switch (task.status) {
+    internal.TaskStatus.pending => AppColors.warning,
+    internal.TaskStatus.inProgress => AppColors.info,
+    internal.TaskStatus.completed => AppColors.success,
+    internal.TaskStatus.overdue => AppColors.error,
+  };
+
+  IconData get _typeIcon => switch (task.taskType) {
+    internal.TaskType.planting => Icons.grass_rounded,
+    internal.TaskType.watering => Icons.water_drop_rounded,
+    internal.TaskType.fertilizing => Icons.science_rounded,
+    internal.TaskType.observation => Icons.visibility_rounded,
+    internal.TaskType.inspection => Icons.search_rounded,
+    internal.TaskType.other => Icons.more_horiz_rounded,
+  };
+
+  String get _statusLabel => switch (task.status) {
+    internal.TaskStatus.pending => 'Chờ xử lý',
+    internal.TaskStatus.inProgress => 'Đang thực hiện',
+    internal.TaskStatus.completed => 'Hoàn thành',
+    internal.TaskStatus.overdue => 'Quá hạn',
+  };
+
+  bool get _isOverdue => task.status == internal.TaskStatus.overdue ||
+      (task.status != internal.TaskStatus.completed && task.dueDate.isBefore(DateTime.now()));
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+      decoration: BoxDecoration(color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128), borderRadius: BorderRadius.circular(2))))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            child: Row(
+              children: [
+                Container(width: 56, height: 56, decoration: BoxDecoration(color: _statusColor.withAlpha(20), borderRadius: BorderRadius.circular(14)), child: Icon(_typeIcon, size: 28, color: _statusColor)),
+                const SizedBox(width: 16),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(task.taskName, style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 6),
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: _statusColor.withAlpha(20), borderRadius: BorderRadius.circular(8)), child: Text(_statusLabel, style: tt.labelSmall?.copyWith(color: _statusColor, fontWeight: FontWeight.w600))),
+                  ],
+                )),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (task.description != null && task.description!.isNotEmpty) ...[
+                    _ExpDetailItem(icon: Icons.description_outlined, label: 'Mô tả', value: task.description!, color: AppColors.info, isDark: isDark),
+                    const SizedBox(height: 12),
+                  ],
+                  Row(children: [
+                    Expanded(child: _ExpMiniDetail(icon: Icons.person_outline_rounded, label: 'Người được giao', value: task.assignedTo ?? 'Chưa giao', isDark: isDark)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _ExpMiniDetail(icon: _isOverdue ? Icons.warning_amber_rounded : Icons.calendar_today_outlined, label: 'Thời hạn', value: _formatDate(task.dueDate), valueColor: _isOverdue ? AppColors.error : null, isDark: isDark)),
+                  ]),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(child: _ExpMiniDetail(icon: Icons.layers_outlined, label: 'Giai đoạn', value: task.experimentStageName ?? 'Không có', isDark: isDark)),
+                    const SizedBox(width: 12),
+                    Expanded(child: _ExpMiniDetail(icon: Icons.inventory_2_outlined, label: 'Lô (Batch)', value: task.batchCode ?? 'Không có', isDark: isDark)),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime dt) => '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+}
+
+class _ExpDetailItem extends StatelessWidget {
+  const _ExpDetailItem({required this.icon, required this.label, required this.value, required this.color, required this.isDark});
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: color.withAlpha(12), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withAlpha(30))),
+      child: Row(children: [
+        Icon(icon, size: 22, color: color),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: tt.labelSmall?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
+          const SizedBox(height: 2),
+          Text(value, style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600), maxLines: 3, overflow: TextOverflow.ellipsis),
+        ])),
+      ]),
+    );
+  }
+}
+
+class _ExpMiniDetail extends StatelessWidget {
+  const _ExpMiniDetail({required this.icon, required this.label, required this.value, this.valueColor, required this.isDark});
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+    final bgCard = isDark ? AppColors.backgroundDark : AppColors.backgroundLight;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: bgCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(60))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [Icon(icon, size: 14, color: textSecondary.withAlpha(153)), const SizedBox(width: 6), Text(label, style: tt.labelSmall?.copyWith(color: textSecondary.withAlpha(153)))]),
+          const SizedBox(height: 4),
+          Text(value, style: tt.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: valueColor ?? (isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight)), maxLines: 2, overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExpTaskReportSheet extends ConsumerWidget {
+  const _ExpTaskReportSheet({required this.task});
+  final internal.TaskModel task;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tt = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final reportAsync = ref.watch(taskReportByTaskProvider(task.id));
+    final imagesAsync = ref.watch(taskImagesByTaskProvider(task.id));
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+      decoration: BoxDecoration(color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(128), borderRadius: BorderRadius.circular(2))))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            child: Row(children: [
+              Container(width: 48, height: 48, decoration: BoxDecoration(color: AppColors.success.withAlpha(20), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.assessment_rounded, color: AppColors.success, size: 24)),
+              const SizedBox(width: 14),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Báo cáo: ${task.taskName}', style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w700), maxLines: 2, overflow: TextOverflow.ellipsis),
+                Text('Thông tin báo cáo từ người thực hiện', style: tt.bodySmall?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
+              ])),
+            ]),
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: reportAsync.when(
+              data: (report) {
+                if (report == null) {
+                  return Center(child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.info_outline_rounded, size: 64, color: (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight).withAlpha(77)),
+                      const SizedBox(height: 12),
+                      Text('Chưa có báo cáo', style: tt.titleMedium?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
+                      const SizedBox(height: 8),
+                      Text('Báo cáo sẽ được cập nhật sau khi công việc hoàn thành', style: tt.bodySmall?.copyWith(color: (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight).withAlpha(153))),
+                    ],
+                  ));
+                }
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _ExpReportItem(icon: Icons.description_rounded, label: 'Nội dung báo cáo', value: report.description.isNotEmpty ? report.description : report.title, color: AppColors.info, isDark: isDark),
+                      const SizedBox(height: 12),
+                      _ExpReportItem(icon: Icons.person_rounded, label: 'Người nộp', value: report.submittedBy ?? 'Không xác định', color: AppColors.primary, isDark: isDark),
+                      const SizedBox(height: 12),
+                      _ExpReportItem(icon: Icons.calendar_today_rounded, label: 'Ngày nộp', value: _formatDateTime(report.submittedAt), color: AppColors.success, isDark: isDark),
+                      const SizedBox(height: 24),
+                      Row(children: [
+                        Icon(Icons.photo_library_rounded, size: 20, color: AppColors.warning),
+                        const SizedBox(width: 8),
+                        Text('Hình ảnh', style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                      ]),
+                      const SizedBox(height: 12),
+                      imagesAsync.when(
+                        data: (images) {
+                          if (images.isEmpty) {
+                            return Container(
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(color: (isDark ? AppColors.backgroundDark : AppColors.backgroundLight).withAlpha(128), borderRadius: BorderRadius.circular(12)),
+                              child: Center(child: Text('Chưa có hình ảnh', style: tt.bodyMedium?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight))),
+                            );
+                          }
+                          return SizedBox(
+                            height: 120,
+                            child: ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: images.length,
+                              itemBuilder: (context, index) {
+                                final image = images[index];
+                                return Padding(
+                                  padding: EdgeInsets.only(right: index < images.length - 1 ? 12 : 0),
+                                  child: GestureDetector(
+                                    onTap: () => _showImageFullScreen(context, image.imageUrl),
+                                    child: Container(
+                                      width: 120,
+                                      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: AppColors.primary.withAlpha(20)),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.network(image.imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Center(child: Icon(Icons.broken_image_rounded, color: Colors.grey))),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                        loading: () => const Center(child: CircularProgressIndicator()),
+                        error: (e, _) => Text('Lỗi tải ảnh: $e'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(child: Text('Lỗi: $e')),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showImageFullScreen(BuildContext context, String imageUrl) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: GestureDetector(
+          onTap: () => Navigator.pop(context),
+          child: InteractiveViewer(child: ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.network(imageUrl, fit: BoxFit.contain))),
+        ),
+      ),
+    );
+  }
+
+  String _formatDateTime(DateTime dt) => '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+}
+
+class _ExpReportItem extends StatelessWidget {
+  const _ExpReportItem({required this.icon, required this.label, required this.value, required this.color, required this.isDark});
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: color.withAlpha(12), borderRadius: BorderRadius.circular(12), border: Border.all(color: color.withAlpha(30))),
+      child: Row(children: [
+        Icon(icon, size: 22, color: color),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: tt.labelSmall?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight)),
+          const SizedBox(height: 2),
+          Text(value, style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600), maxLines: 3, overflow: TextOverflow.ellipsis),
+        ])),
+      ]),
+    );
+  }
+}
+
+class _TasksEmptyState extends ConsumerWidget {
+  const _TasksEmptyState({this.message});
+  final String? message;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tt = Theme.of(context).textTheme;
+    final bgCard = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(AppSpacing.xl),
+        padding: const EdgeInsets.all(AppSpacing.xxl),
+        decoration: BoxDecoration(color: bgCard, borderRadius: BorderRadius.circular(20), border: Border.all(color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80))),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.task_alt_outlined, size: 56, color: (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight).withAlpha(77)),
+            const SizedBox(height: AppSpacing.lg),
+            Text(message ?? 'Chưa có task nào', style: tt.titleMedium?.copyWith(color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight, fontWeight: FontWeight.w600)),
+            if (message == null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text('Tạo task để theo dõi tiến độ thực nghiệm', style: tt.bodySmall?.copyWith(color: (isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight).withAlpha(153)), textAlign: TextAlign.center),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -2640,130 +2986,6 @@ class _ExpMetaChip extends StatelessWidget {
   }
 }
 
-class _ExpTaskDetailSheet extends StatelessWidget {
-  const _ExpTaskDetailSheet({required this.task});
-  final TaskModel task;
-
-  Color get _statusColor => switch (task.status) {
-    TaskStatus.pending    => AppColors.warning,
-    TaskStatus.inProgress => AppColors.info,
-    TaskStatus.completed => AppColors.success,
-    TaskStatus.overdue   => AppColors.error,
-  };
-
-  IconData get _typeIcon => switch (task.taskType) {
-    TaskType.planting     => Icons.grass_rounded,
-    TaskType.watering    => Icons.water_drop_rounded,
-    TaskType.fertilizing => Icons.eco_rounded,
-    TaskType.observation => Icons.visibility_rounded,
-    TaskType.inspection  => Icons.search_rounded,
-  };
-
-  String get _statusLabel => switch (task.status) {
-    TaskStatus.pending    => 'Chờ xử lý',
-    TaskStatus.inProgress => 'Đang thực hiện',
-    TaskStatus.completed => 'Hoàn thành',
-    TaskStatus.overdue   => 'Quá hạn',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgSurface = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
-    final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
-    final textPrimary = isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
-
-    final isOverdue = task.status == TaskStatus.overdue ||
-        (task.status != TaskStatus.completed && task.dueDate.isBefore(DateTime.now()));
-
-    return Container(
-      decoration: BoxDecoration(
-        color: bgSurface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                color: textSecondary.withAlpha(77),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 52, height: 52,
-                decoration: BoxDecoration(
-                  color: _statusColor.withAlpha(20),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: _statusColor.withAlpha(35)),
-                ),
-                child: Icon(_typeIcon, size: 26, color: _statusColor),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(task.taskName, style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: _statusColor.withAlpha(20),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(_statusLabel, style: tt.labelSmall?.copyWith(color: _statusColor, fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (task.description != null && task.description!.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            Text('Mô tả', style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w600, color: textSecondary)),
-            const SizedBox(height: 6),
-            Text(task.description!, style: tt.bodyMedium?.copyWith(color: textPrimary, height: 1.4)),
-          ],
-          const SizedBox(height: 20),
-          _ExpDetailRow(icon: Icons.person_outline_rounded, label: 'Người được giao', value: task.assignedTo ?? 'Chưa giao', isDark: isDark),
-          const SizedBox(height: 12),
-          _ExpDetailRow(
-            icon: isOverdue ? Icons.warning_amber_rounded : Icons.calendar_today_outlined,
-            label: 'Thời hạn',
-            value: _formatDate(task.dueDate),
-            valueColor: isOverdue ? AppColors.error : null,
-            isDark: isDark,
-          ),
-          if (task.batchId != null && task.batchId!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _ExpDetailRow(icon: Icons.batch_prediction_rounded, label: 'Batch', value: task.batchId!, isDark: isDark),
-          ],
-          if (task.stageId != null && task.stageId!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _ExpDetailRow(icon: Icons.layers_outlined, label: 'Giai đoạn', value: task.stageId!, isDark: isDark),
-          ],
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(DateTime dt) {
-    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
-  }
-}
-
 class _ExpDetailRow extends StatelessWidget {
   const _ExpDetailRow({required this.icon, required this.label, required this.value, this.valueColor, required this.isDark});
   final IconData icon;
@@ -2789,371 +3011,3 @@ class _ExpDetailRow extends StatelessWidget {
   }
 }
 
-// ─── CREATE DESIGN BUTTON ─────────────────────────────────────────────────────
-
-class _CreateDesignButton extends StatelessWidget {
-  const _CreateDesignButton({required this.experiment});
-  final ExperimentModel experiment;
-
-  void _showCreateDesignSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _CreateDesignSheet(experiment: experiment),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => _showCreateDesignSheet(context),
-      child: Container(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        decoration: BoxDecoration(
-          color: AppColors.primary.withAlpha(13),
-          borderRadius: AppRadius.heroRadius,
-          border: Border.all(color: AppColors.primary.withAlpha(51)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.primary.withAlpha(25),
-                borderRadius: BorderRadius.circular(AppRadius.small),
-              ),
-              child: Icon(Icons.design_services_rounded, color: AppColors.primary, size: 22),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Tạo / Cập nhật thiết kế chi tiết',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Thêm thiết kế thực nghiệm: loại thiết kế, cỡ mẫu, nhóm xử lý...',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(AppRadius.small),
-              ),
-              child: const Icon(Icons.add_rounded, color: Colors.white, size: 18),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── CREATE DESIGN SHEET ────────────────────────────────────────────────────
-
-class _CreateDesignSheet extends StatefulWidget {
-  const _CreateDesignSheet({required this.experiment});
-  final ExperimentModel experiment;
-
-  @override
-  State<_CreateDesignSheet> createState() => _CreateDesignSheetState();
-}
-
-class _CreateDesignSheetState extends State<_CreateDesignSheet> {
-  final _formKey = GlobalKey<FormState>();
-
-  DesignType _selectedDesignType = DesignType.completelyRandomized;
-  final _sampleSizeController = TextEditingController();
-  final _replicationController = TextEditingController();
-  final _treatmentController = TextEditingController();
-  final _observationFreqController = TextEditingController();
-  final _measurementFreqController = TextEditingController();
-  final _evaluationController = TextEditingController();
-  final _analysisController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _sampleSizeController.text = widget.experiment.design.sampleSize.toString();
-    _replicationController.text = widget.experiment.design.replicationCount.toString();
-    _treatmentController.text = widget.experiment.design.treatmentCount.toString();
-    _observationFreqController.text =
-        widget.experiment.design.observationFrequencyDays?.toString() ?? '';
-    _measurementFreqController.text =
-        widget.experiment.design.measurementFrequencyDays?.toString() ?? '';
-    _evaluationController.text =
-        widget.experiment.design.evaluationCriteria ?? '';
-    _analysisController.text =
-        widget.experiment.design.analysisPlan ?? '';
-  }
-
-  @override
-  void dispose() {
-    _sampleSizeController.dispose();
-    _replicationController.dispose();
-    _treatmentController.dispose();
-    _observationFreqController.dispose();
-    _measurementFreqController.dispose();
-    _evaluationController.dispose();
-    _analysisController.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Thiết kế thực nghiệm đã được lưu thành công.'),
-        backgroundColor: AppColors.success,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.medium)),
-      ),
-    );
-  }
-
-  String _designTypeLabel(DesignType type) => switch (type) {
-    DesignType.completelyRandomized => 'CRD – Completely Randomized Design',
-    DesignType.randomizedBlock       => 'RCBD – Randomized Complete Block Design',
-    DesignType.factorial            => 'Factorial Design',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.hero)),
-      ),
-      padding: EdgeInsets.only(bottom: bottomPadding),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: AppSpacing.sm),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: (isDark ? Colors.white : Colors.black).withAlpha(51),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      gradient: AppColors.greenGradient(context),
-                      borderRadius: BorderRadius.circular(AppRadius.small),
-                    ),
-                    child: const Icon(Icons.design_services_rounded, color: Colors.white, size: 20),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Tạo thiết kế thực nghiệm',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text(
-                          widget.experiment.title,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: Icon(Icons.close_rounded, color: Theme.of(context).colorScheme.onSurface.withAlpha(128)),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: AppSpacing.lg),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Loại thiết kế',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    ...DesignType.values.map((type) => RadioListTile<DesignType>(
-                      value: type,
-                      groupValue: _selectedDesignType,
-                      onChanged: (v) => setState(() => _selectedDesignType = v!),
-                      title: Text(_designTypeLabel(type), style: const TextStyle(fontSize: 13)),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      visualDensity: VisualDensity.compact,
-                    )),
-                    const SizedBox(height: AppSpacing.md),
-                    Row(
-                      children: [
-                        Expanded(child: _SheetTextField(
-                          controller: _sampleSizeController,
-                          label: 'Cỡ mẫu (plants)',
-                          hint: '60',
-                          keyboardType: TextInputType.number,
-                          validator: (v) => v == null || v.isEmpty ? 'Bắt buộc' : null,
-                        )),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(child: _SheetTextField(
-                          controller: _replicationController,
-                          label: 'Số lần lặp',
-                          hint: '3',
-                          keyboardType: TextInputType.number,
-                          validator: (v) => v == null || v.isEmpty ? 'Bắt buộc' : null,
-                        )),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _SheetTextField(
-                      controller: _treatmentController,
-                      label: 'Số nhóm xử lý',
-                      hint: '2',
-                      keyboardType: TextInputType.number,
-                      validator: (v) => v == null || v.isEmpty ? 'Bắt buộc' : null,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    Row(
-                      children: [
-                        Expanded(child: _SheetTextField(
-                          controller: _observationFreqController,
-                          label: 'Tần suất quan sát (ngày)',
-                          hint: '2',
-                          keyboardType: TextInputType.number,
-                        )),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(child: _SheetTextField(
-                          controller: _measurementFreqController,
-                          label: 'Tần suất đo lường (ngày)',
-                          hint: '7',
-                          keyboardType: TextInputType.number,
-                        )),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _SheetTextField(
-                      controller: _evaluationController,
-                      label: 'Tiêu chí đánh giá',
-                      hint: 'Chiều cao, số lá, tỷ lệ sống...',
-                      maxLines: 2,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _SheetTextField(
-                      controller: _analysisController,
-                      label: 'Kế hoạch phân tích',
-                      hint: 'ANOVA, Tukey HSD, p < 0.05',
-                      maxLines: 2,
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _submit,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppRadius.medium),
-                          ),
-                        ),
-                        child: Text(
-                          'Lưu thiết kế',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SheetTextField extends StatelessWidget {
-  const _SheetTextField({
-    required this.controller,
-    required this.label,
-    required this.hint,
-    this.keyboardType,
-    this.maxLines = 1,
-    this.validator,
-  });
-
-  final TextEditingController controller;
-  final String label;
-  final String hint;
-  final TextInputType? keyboardType;
-  final int maxLines;
-  final String? Function(String?)? validator;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      maxLines: maxLines,
-      validator: validator,
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.medium)),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.md,
-        ),
-      ),
-    );
-  }
-}

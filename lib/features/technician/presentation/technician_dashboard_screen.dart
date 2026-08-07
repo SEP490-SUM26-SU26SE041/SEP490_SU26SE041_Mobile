@@ -1,23 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../shared/widgets/agritech_environment_background.dart';
-import '../../../shared/widgets/alert_banner.dart';
 import '../../../shared/widgets/plant_photo_gallery.dart';
 import '../../../shared/widgets/sensor_status_badge.dart';
 import '../../../shared/widgets/profile_button.dart';
-import '../../../mock/mock_farm.dart';
-import '../../../mock/mock_growth_data.dart';
 import '../../../shared/models/farm_model.dart';
+import '../../../mock/mock_farm.dart';
+import '../../../shared/models/growth_task_model.dart' as internal;
+import '../providers/technician_task_providers.dart';
 
-class TechnicianDashboardScreen extends StatelessWidget {
+class TechnicianDashboardScreen extends ConsumerWidget {
   const TechnicianDashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tt = Theme.of(context).textTheme;
-    final sensorAnomalies = _getSensorAnomalies();
+    final stats = ref.watch(technicianDashboardStatsProvider);
     final allSensors = _getAllSensors();
     final online = allSensors.where((s) => s.status == SensorStatusType.online).toList();
     final tempSensor = online.isNotEmpty ? online.first : null;
@@ -39,19 +40,11 @@ class TechnicianDashboardScreen extends StatelessWidget {
                     children: [
                       _buildHeader(tt),
                       const SizedBox(height: AppSpacing.xl),
-                      if (sensorAnomalies.isNotEmpty) ...[
-                        AlertBanner(
-                          message: '${sensorAnomalies.length} cảm biến cần kiểm tra!',
-                          level: AlertLevel.warning,
-                          onTap: () => context.push('/tech/iot'),
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                      ],
                       _buildEnvMetrics(tempSensor, humiditySensors, online.length),
                       const SizedBox(height: AppSpacing.xl),
                       _buildSectionHeader('Chỉ số hôm nay', Icons.insights_rounded, AppColors.primary),
                       const SizedBox(height: AppSpacing.md),
-                      _buildKPIGrid(),
+                      _buildKPIGrid(stats),
                       const SizedBox(height: AppSpacing.xl),
                       _buildSectionHeader('Thao tác nhanh', Icons.flash_on_rounded, AppColors.warning),
                       const SizedBox(height: AppSpacing.md),
@@ -63,7 +56,7 @@ class TechnicianDashboardScreen extends StatelessWidget {
                       const SizedBox(height: AppSpacing.xl),
                       _buildSectionHeader('Công việc hôm nay', Icons.assignment_rounded, AppColors.primary),
                       const SizedBox(height: AppSpacing.md),
-                      _buildPendingTasksList(context),
+                      _buildPendingTasksList(context, ref),
                       const SizedBox(height: AppSpacing.xl),
                       _buildSectionHeader('Tổng quan cảm biến', Icons.sensors_rounded, AppColors.info),
                       const SizedBox(height: AppSpacing.md),
@@ -123,25 +116,31 @@ class TechnicianDashboardScreen extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _EnvMetricChip(
-            icon: Icons.thermostat_rounded,
-            value: '${tempSensor?.latestValue?.toStringAsFixed(1) ?? '—'}°C',
-            label: 'Nhiệt độ',
-            color: AppColors.warning,
+          Expanded(
+            child: _EnvMetricChip(
+              icon: Icons.thermostat_rounded,
+              value: '${tempSensor?.latestValue?.toStringAsFixed(1) ?? '—'}°C',
+              label: 'Nhiệt độ',
+              color: AppColors.warning,
+            ),
           ),
           Container(width: 1, height: 40, color: AppColors.borderLight),
-          _EnvMetricChip(
-            icon: Icons.water_drop_rounded,
-            value: '${humiditySensors.isNotEmpty && humiditySensors.first.latestValue != null ? humiditySensors.first.latestValue!.toStringAsFixed(0) : '—'}%',
-            label: 'Độ ẩm',
-            color: AppColors.info,
+          Expanded(
+            child: _EnvMetricChip(
+              icon: Icons.water_drop_rounded,
+              value: '${humiditySensors.isNotEmpty && humiditySensors.first.latestValue != null ? humiditySensors.first.latestValue!.toStringAsFixed(0) : '—'}%',
+              label: 'Độ ẩm',
+              color: AppColors.info,
+            ),
           ),
           Container(width: 1, height: 40, color: AppColors.borderLight),
-          _EnvMetricChip(
-            icon: Icons.sensors_rounded,
-            value: '$onlineCount',
-            label: 'Online',
-            color: AppColors.success,
+          Expanded(
+            child: _EnvMetricChip(
+              icon: Icons.sensors_rounded,
+              value: '$onlineCount',
+              label: 'Online',
+              color: AppColors.success,
+            ),
           ),
         ],
       ),
@@ -165,15 +164,34 @@ class TechnicianDashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildKPIGrid() {
-    return Row(
-      children: [
-        Expanded(child: _KPICard(value: '5', label: 'Hôm nay', color: AppColors.info, icon: Icons.task_alt_rounded)),
-        const SizedBox(width: 12),
-        Expanded(child: _KPICard(value: '1', label: 'Quá hạn', color: AppColors.error, icon: Icons.warning_amber_rounded)),
-        const SizedBox(width: 12),
-        Expanded(child: _KPICard(value: '12', label: 'Tuần này', color: AppColors.success, icon: Icons.check_circle_outline_rounded)),
-      ],
+  Widget _buildKPIGrid(AsyncValue<TechDashboardStats> stats) {
+    return stats.when(
+      data: (s) => Row(
+        children: [
+          Expanded(child: _KPICard(value: '${s.todayTasks}', label: 'Hôm nay', color: AppColors.info, icon: Icons.task_alt_rounded)),
+          const SizedBox(width: 12),
+          Expanded(child: _KPICard(value: '${s.overdueTasks}', label: 'Quá hạn', color: AppColors.error, icon: Icons.warning_amber_rounded)),
+          const SizedBox(width: 12),
+          Expanded(child: _KPICard(value: '${s.totalTasks}', label: 'Tuần này', color: AppColors.success, icon: Icons.check_circle_outline_rounded)),
+        ],
+      ),
+      loading: () => Row(
+        children: [
+          for (int i = 0; i < 3; i++) ...[
+            if (i > 0) const SizedBox(width: 12),
+            Expanded(child: Container(height: 80, decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(16)))),
+          ],
+        ],
+      ),
+      error: (_, __) => Row(
+        children: [
+          Expanded(child: _KPICard(value: '—', label: 'Hôm nay', color: AppColors.info, icon: Icons.task_alt_rounded)),
+          const SizedBox(width: 12),
+          Expanded(child: _KPICard(value: '—', label: 'Quá hạn', color: AppColors.error, icon: Icons.warning_amber_rounded)),
+          const SizedBox(width: 12),
+          Expanded(child: _KPICard(value: '—', label: 'Tuần này', color: AppColors.success, icon: Icons.check_circle_outline_rounded)),
+        ],
+      ),
     );
   }
 
@@ -189,17 +207,23 @@ class TechnicianDashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildPendingTasksList(BuildContext context) {
-    final schedule = _getTodaySchedule();
-    final pending = schedule.where((s) => s.status != 'completed').toList();
-    if (pending.isEmpty) {
-      return _EmptyState(message: 'Không có công việc chờ xử lý', icon: Icons.check_circle_outline_rounded);
-    }
-    return Column(
-      children: pending.map((item) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: _TechTaskCard(scheduleItem: item, onTap: () => context.go('/tech/tasks')),
-      )).toList(),
+  Widget _buildPendingTasksList(BuildContext context, WidgetRef ref) {
+    final tasks = ref.watch(technicianTasksProvider);
+
+    return tasks.when(
+      data: (taskList) {
+        if (taskList.isEmpty) {
+          return _EmptyState(message: 'Không có công việc chờ xử lý', icon: Icons.check_circle_outline_rounded);
+        }
+        return Column(
+          children: taskList.take(5).map((task) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _TechTaskCard(task: task, onTap: () => context.go('/tech/tasks')),
+          )).toList(),
+        );
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (_, __) => _EmptyState(message: 'Lỗi tải công việc', icon: Icons.error_outline),
     );
   }
 
@@ -216,13 +240,6 @@ class TechnicianDashboardScreen extends StatelessWidget {
         Expanded(child: _SensorStatusCard(label: 'Warning', count: warning, status: SensorStatus.warning)),
       ],
     );
-  }
-
-  List<CareScheduleModel> _getTodaySchedule() => mockCareSchedules;
-
-  List<SensorModel> _getSensorAnomalies() {
-    return _getAllSensors().where((s) =>
-        s.status == SensorStatusType.offline || s.status == SensorStatusType.warning).toList();
   }
 
   List<SensorModel> _getAllSensors() {
@@ -382,29 +399,25 @@ class _QuickActionCard extends StatelessWidget {
 }
 
 class _TechTaskCard extends StatelessWidget {
-  const _TechTaskCard({required this.scheduleItem, required this.onTap});
-  final CareScheduleModel scheduleItem;
+  const _TechTaskCard({required this.task, required this.onTap});
+  final internal.TaskModel task;
   final VoidCallback onTap;
 
-  Color get _color => switch (scheduleItem.scheduleType.toLowerCase()) {
-    'watering' => AppColors.info,
-    'fertilizing' => AppColors.primary,
-    'inspection' => AppColors.warning,
-    _ => AppColors.accent,
-  };
+  Color get _color {
+    final type = task.taskType.toString().toLowerCase();
+    if (type.contains('water')) return AppColors.info;
+    if (type.contains('fertiliz')) return AppColors.primary;
+    if (type.contains('inspect')) return AppColors.warning;
+    return AppColors.accent;
+  }
 
-  IconData get _icon => switch (scheduleItem.scheduleType.toLowerCase()) {
-    'watering' => Icons.water_drop_rounded,
-    'fertilizing' => Icons.grass_rounded,
-    'inspection' => Icons.search_rounded,
-    _ => Icons.agriculture_rounded,
-  };
-
-  Color get _statusColor => switch (scheduleItem.status) {
-    'completed' => AppColors.success,
-    'in_progress' => AppColors.info,
-    _ => AppColors.warning,
-  };
+  IconData get _icon {
+    final type = task.taskType.toString().toLowerCase();
+    if (type.contains('water')) return Icons.water_drop_rounded;
+    if (type.contains('fertiliz')) return Icons.grass_rounded;
+    if (type.contains('inspect')) return Icons.search_rounded;
+    return Icons.agriculture_rounded;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -440,13 +453,16 @@ class _TechTaskCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(scheduleItem.scheduleType, style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(task.taskName, style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 4),
                     Row(
                       children: [
                         Icon(Icons.schedule_rounded, size: 12, color: cs.onSurface.withAlpha(102)),
                         const SizedBox(width: 4),
-                        Text(_formatTime(scheduleItem.scheduledAt), style: tt.labelSmall?.copyWith(color: cs.onSurface.withAlpha(128))),
+                        Text(
+                          '${task.dueDate.day}/${task.dueDate.month}',
+                          style: tt.labelSmall?.copyWith(color: cs.onSurface.withAlpha(128)),
+                        ),
                       ],
                     ),
                   ],
@@ -454,8 +470,8 @@ class _TechTaskCard extends StatelessWidget {
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: _statusColor.withAlpha(20), borderRadius: BorderRadius.circular(8)),
-                child: Text(scheduleItem.status == 'completed' ? 'Xong' : 'Chờ', style: tt.labelSmall?.copyWith(color: _statusColor, fontWeight: FontWeight.w700)),
+                decoration: BoxDecoration(color: _color.withAlpha(20), borderRadius: BorderRadius.circular(8)),
+                child: Text('Chờ', style: tt.labelSmall?.copyWith(color: _color, fontWeight: FontWeight.w700)),
               ),
               const SizedBox(width: 4),
               Icon(Icons.chevron_right_rounded, size: 20, color: cs.onSurface.withAlpha(77)),
@@ -465,8 +481,6 @@ class _TechTaskCard extends StatelessWidget {
       ),
     );
   }
-
-  String _formatTime(DateTime dt) => '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 }
 
 class _SensorStatusCard extends StatelessWidget {

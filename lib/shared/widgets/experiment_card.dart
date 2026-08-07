@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_radius.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_animation.dart';
+import '../../core/utils/date_utils.dart';
 import '../../shared/models/experiment_model.dart';
 
 class ExperimentCard extends StatefulWidget {
@@ -60,7 +60,6 @@ class _ExperimentCardState extends State<ExperimentCard> {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final dateFormat = DateFormat('dd/MM/yyyy');
     final statusColor = widget._statusColor;
 
     // Colored shadow toward status color
@@ -192,7 +191,7 @@ class _ExperimentCardState extends State<ExperimentCard> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        dateFormat.format(widget.startDate),
+                        formatDate(widget.startDate),
                         style: tt.labelSmall?.copyWith(
                           color: cs.onSurface.withAlpha(102),
                         ),

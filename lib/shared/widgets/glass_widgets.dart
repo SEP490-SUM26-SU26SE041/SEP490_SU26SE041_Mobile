@@ -76,6 +76,7 @@ class _GlassCardState extends State<GlassCard> with SingleTickerProviderStateMix
       builder: (context, child) {
         return Container(
           margin: widget.margin,
+          width: double.infinity,
           decoration: BoxDecoration(
             color: surfaceColor,
             borderRadius: BorderRadius.circular(radius),
@@ -90,72 +91,31 @@ class _GlassCardState extends State<GlassCard> with SingleTickerProviderStateMix
           ),
           child: Stack(
             children: [
-              // Inner highlight border (top edge) — simulates edge refraction
+              // Main content (provides intrinsic size)
+              Padding(
+                padding: widget.padding ?? const EdgeInsets.all(AppSpacing.lg),
+                child: widget.child,
+              ),
+              // Top highlight line (only 1px)
               Positioned(
                 top: 0,
                 left: 0,
                 right: 0,
                 height: 1,
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(radius)),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.topRight,
-                      colors: [
-                        innerBorderColor,
-                        innerBorderColor.withAlpha(0),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // Inner shadow (bottom edge) for depth
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(radius),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        isDark
-                            ? Colors.black.withAlpha(8)
-                            : Colors.black.withAlpha(4),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // Shimmer sweep overlay
-              if (_isPressed)
-                Positioned.fill(
+                child: IgnorePointer(
                   child: Container(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(radius),
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(radius)),
                       gradient: LinearGradient(
                         begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+                        end: Alignment.topRight,
                         colors: [
-                          Colors.transparent,
-                          shimmerColor,
-                          Colors.transparent,
-                        ],
-                        stops: [
-                          (_shimmerCtrl.value - 0.3).clamp(0.0, 1.0),
-                          _shimmerCtrl.value,
-                          (_shimmerCtrl.value + 0.3).clamp(0.0, 1.0),
+                          innerBorderColor,
+                          innerBorderColor.withAlpha(0),
                         ],
                       ),
                     ),
                   ),
-                ),
-              // Content
-              Positioned.fill(
-                child: Padding(
-                  padding: widget.padding ?? const EdgeInsets.all(AppSpacing.lg),
-                  child: widget.child,
                 ),
               ),
             ],

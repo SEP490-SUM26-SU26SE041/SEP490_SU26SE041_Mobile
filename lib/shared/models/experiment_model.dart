@@ -55,29 +55,57 @@ class ExperimentGroup {
 
 class ExperimentDesign {
   const ExperimentDesign({
+    required this.id,
     required this.designType,
-    required this.sampleSize,
     required this.replicationCount,
-    required this.treatmentCount,
-    this.observationFrequencyDays,
-    this.measurementFrequencyDays,
-    this.evaluationCriteria,
-    this.analysisPlan,
+    required this.randomizationMethod,
+    this.designParameters,
   });
-  final DesignType designType;
-  final int sampleSize;
+  final String id;
+  final String designType;
   final int replicationCount;
-  final int treatmentCount;
-  final int? observationFrequencyDays;
-  final int? measurementFrequencyDays;
-  final String? evaluationCriteria;
-  final String? analysisPlan;
+  final String randomizationMethod;
+  final DesignParameters? designParameters;
 
-  String get designTypeLabel => switch (designType) {
-    DesignType.completelyRandomized => 'CRD',
-    DesignType.randomizedBlock       => 'RCBD',
-    DesignType.factorial            => 'Factorial',
-  };
+  String get designTypeLabel {
+    if (designType.contains('CRD') || designType == 'CRD') return 'CRD';
+    if (designType.contains('RCBD') || designType == 'RCBD') return 'RCBD';
+    if (designType.contains('Factorial')) return 'Factorial';
+    return designType;
+  }
+}
+
+class DesignParameters {
+  const DesignParameters({
+    this.notes,
+    this.layout,
+    this.spacing,
+    this.plotArea,
+    this.plotWidth,
+    this.blockCount,
+    this.bufferZone,
+    this.plotLength,
+    this.randomSeed,
+    this.treatments,
+    this.plantsPerPlot,
+  });
+  final String? notes;
+  final String? layout;
+  final PlotSpacing? spacing;
+  final int? plotArea;
+  final double? plotWidth;
+  final int? blockCount;
+  final String? bufferZone;
+  final double? plotLength;
+  final int? randomSeed;
+  final int? treatments;
+  final int? plantsPerPlot;
+}
+
+class PlotSpacing {
+  const PlotSpacing({this.row, this.plant});
+  final String? row;
+  final String? plant;
 }
 
 class StageResult {
@@ -154,6 +182,7 @@ class ExperimentModel {
   final int? plantQuantity;
 
   ExperimentStage? get activeStage {
+    if (stages.isEmpty) return null;
     for (final stage in stages) {
       if (stage.status == StageStatus.active) return stage;
     }
@@ -161,7 +190,10 @@ class ExperimentModel {
   }
 
   double get progress {
+    if (stages.isEmpty) return 0.0;
     final completed = stages.where((s) => s.status == StageStatus.completed).length;
-    return completed / stages.length;
+    final p = completed / stages.length;
+    if (p.isNaN || p.isInfinite) return 0.0;
+    return p;
   }
 }

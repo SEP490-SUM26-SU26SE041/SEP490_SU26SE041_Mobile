@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
+import '../../core/utils/date_utils.dart';
 import '../../mock/mock_plant_photos.dart';
 import '../../shared/models/care_activity_model.dart';
 
@@ -244,7 +244,7 @@ class _PlantPhotoCard extends StatelessWidget {
     if (diff.inMinutes < 60) return '${diff.inMinutes}p trước';
     if (diff.inHours < 24) return '${diff.inHours}h trước';
     if (diff.inDays < 7) return '${diff.inDays}d trước';
-    return DateFormat('dd/MM').format(dt);
+    return formatDate(dt, pattern: 'dd/MM');
   }
 }
 
@@ -318,7 +318,7 @@ class _PhotoDetailSheet extends StatelessWidget {
                   children: [
                     Icon(Icons.access_time_rounded, size: 14, color: cs.onSurface.withAlpha(128)),
                     const SizedBox(width: 4),
-                    Text(DateFormat('dd/MM/yyyy HH:mm').format(photo.uploadedAt),
+                    Text(formatDateTime(photo.uploadedAt),
                         style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(128))),
                   ],
                 ),

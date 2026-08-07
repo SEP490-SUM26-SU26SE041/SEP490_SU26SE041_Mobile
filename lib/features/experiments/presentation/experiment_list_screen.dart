@@ -100,12 +100,6 @@ class ExperimentListScreen extends ConsumerWidget {
                             color: cs.onSurface.withAlpha(128),
                           ),
                         ),
-                        const SizedBox(height: AppSpacing.lg),
-                        ElevatedButton.icon(
-                          onPressed: () => context.push('/experiments/create'),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Create Experiment'),
-                        ),
                       ],
                     ),
                   );
@@ -137,15 +131,7 @@ class ExperimentListScreen extends ConsumerWidget {
           ),
         ],
       ),
-      floatingActionButton: analyticsMode
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () => context.push('/experiments/create'),
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              icon: const Icon(Icons.add),
-              label: const Text('Create'),
-            ),
+      floatingActionButton: analyticsMode ? null : const SizedBox.shrink(),
     );
   }
 

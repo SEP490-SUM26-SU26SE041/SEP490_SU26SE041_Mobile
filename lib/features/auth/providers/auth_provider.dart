@@ -1,9 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_application_2/features/auth/data/auth_repository.dart';
 import 'package:flutter_application_2/shared/models/user_model.dart';
+import 'package:flutter_application_2/core/api/services/auth_api_service.dart';
+import '../data/auth_api_repository.dart';
 
-final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return MockAuthRepository();
+final authApiRepositoryProvider = Provider<AuthRepository>((ref) {
+  return AuthRepository(ref.read(authApiServiceProvider));
 });
 
 sealed class AuthState {
@@ -40,7 +41,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> login(String email, String password) async {
     state = const AuthLoading();
     try {
-      final user = await ref.read(authRepositoryProvider).login(email, password);
+      final repo = ref.read(authApiRepositoryProvider);
+      final user = await repo.login(email, password);
       state = AuthAuthenticated(user);
     } catch (e) {
       state = AuthError(e.toString().replaceAll('Exception: ', ''));
@@ -48,7 +50,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
-    await ref.read(authRepositoryProvider).logout();
+    final repo = ref.read(authApiRepositoryProvider);
+    await repo.logout();
     state = const AuthUnauthenticated();
   }
 }

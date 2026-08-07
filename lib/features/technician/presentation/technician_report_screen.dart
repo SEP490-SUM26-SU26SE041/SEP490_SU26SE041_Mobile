@@ -1,31 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../shared/widgets/snms_card.dart';
-class TechnicianReportScreen extends StatefulWidget {
+import '../../../shared/models/growth_task_model.dart';
+import '../providers/technician_task_providers.dart';
+
+class TechnicianReportScreen extends ConsumerStatefulWidget {
   const TechnicianReportScreen({super.key});
 
   @override
-  State<TechnicianReportScreen> createState() => _TechnicianReportScreenState();
+  ConsumerState<TechnicianReportScreen> createState() => _TechnicianReportScreenState();
 }
 
-class _TechnicianReportScreenState extends State<TechnicianReportScreen> {
+class _TechnicianReportScreenState extends ConsumerState<TechnicianReportScreen> {
   final _formKey = GlobalKey<FormState>();
   final _workDoneController = TextEditingController();
   final _issuesFoundController = TextEditingController();
-  final _sensorReadingsController = TextEditingController();
 
   String? _selectedTaskId;
   String _selectedSeverity = 'Low';
   bool _showReportHistory = false;
-
-  final List<_TaskReport> _reportHistory = _mockReportHistory;
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
     _workDoneController.dispose();
     _issuesFoundController.dispose();
-    _sensorReadingsController.dispose();
     super.dispose();
   }
 
@@ -33,6 +34,7 @@ class _TechnicianReportScreenState extends State<TechnicianReportScreen> {
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
+    final tasksAsync = ref.watch(technicianTasksProvider);
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -49,11 +51,13 @@ class _TechnicianReportScreenState extends State<TechnicianReportScreen> {
           ),
         ],
       ),
-      body: _showReportHistory ? _buildReportHistory() : _buildReportForm(context),
+      body: _showReportHistory
+          ? _buildReportHistory(context)
+          : _buildReportForm(context, tasksAsync),
     );
   }
 
-  Widget _buildReportForm(BuildContext context) {
+  Widget _buildReportForm(BuildContext context, AsyncValue<List<TaskModel>> tasksAsync) {
     final tt = Theme.of(context).textTheme;
 
     return SingleChildScrollView(
@@ -97,21 +101,54 @@ class _TechnicianReportScreenState extends State<TechnicianReportScreen> {
             const SizedBox(height: AppSpacing.xl),
             Text('Chọn công việc liên quan', style: tt.titleMedium),
             const SizedBox(height: AppSpacing.sm),
-            DropdownButtonFormField<String>(
-              value: _selectedTaskId,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.task_alt_rounded),
-                hintText: 'Chọn công việc',
-              ),
-              items: _mockTasks.map((task) {
-                return DropdownMenuItem(
-                  value: task.id,
-                  child: Text(task.name),
+            tasksAsync.when(
+              data: (tasks) {
+                final pendingOrInProgress = tasks
+                    .where((t) =>
+                        t.status == TaskStatus.pending ||
+                        t.status == TaskStatus.inProgress)
+                    .toList();
+
+                if (pendingOrInProgress.isEmpty) {
+                  return Container(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withAlpha(15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.warning.withAlpha(50)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline_rounded, color: AppColors.warning),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Text('Không có công việc cần báo cáo',
+                              style: tt.bodyMedium),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                return DropdownButtonFormField<String>(
+                  initialValue: _selectedTaskId,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.task_alt_rounded),
+                    hintText: 'Chọn công việc',
+                  ),
+                  items: pendingOrInProgress
+                      .map((task) => DropdownMenuItem(
+                            value: task.id,
+                            child: Text(task.taskName, overflow: TextOverflow.ellipsis),
+                          ))
+                      .toList(),
+                  onChanged: (value) => setState(() => _selectedTaskId = value),
+                  validator: (value) =>
+                      value == null ? 'Vui lòng chọn công việc' : null,
                 );
-              }).toList(),
-              onChanged: (value) => setState(() => _selectedTaskId = value),
-              validator: (value) =>
-                  value == null ? 'Vui lòng chọn công việc' : null,
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Text('Lỗi: $e'),
             ),
             const SizedBox(height: AppSpacing.lg),
             Text('Tóm tắt công việc đã làm', style: tt.titleMedium),
@@ -138,81 +175,82 @@ class _TechnicianReportScreenState extends State<TechnicianReportScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
-            Text('Chỉ số cảm biến (thủ công)', style: tt.titleMedium),
-            const SizedBox(height: AppSpacing.sm),
-            TextFormField(
-              controller: _sensorReadingsController,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                hintText: 'VD: Nhiệt độ: 28.5°C, Độ ẩm: 72%',
-                alignLabelWithHint: true,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
             Text('Mức độ nghiêm trọng', style: tt.titleMedium),
             const SizedBox(height: AppSpacing.sm),
-            _SeveritySelector(
-              selectedSeverity: _selectedSeverity,
-              onChanged: (value) =>
-                  setState(() => _selectedSeverity = value ?? 'Low'),
+            Wrap(
+              spacing: AppSpacing.sm,
+              children: ['Low', 'Medium', 'High'].map((s) {
+                return ChoiceChip(
+                  label: Text(s),
+                  selected: _selectedSeverity == s,
+                  onSelected: (_) =>
+                      setState(() => _selectedSeverity = s),
+                  selectedColor: AppColors.primary.withAlpha(50),
+                );
+              }).toList(),
             ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('Hình ảnh minh họa', style: tt.titleMedium),
-            const SizedBox(height: AppSpacing.sm),
-            _ImageUploadPlaceholder(),
-            const SizedBox(height: AppSpacing.xxl),
+            const SizedBox(height: AppSpacing.xl),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _submitReport,
-                icon: const Icon(Icons.send_rounded),
-                label: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
-                  child: Text('Gửi báo cáo cho Researcher'),
+              child: ElevatedButton(
+                onPressed: _isSubmitting ? null : _submitReport,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
+                child: _isSubmitting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation(Colors.white),
+                        ),
+                      )
+                    : Text('Gửi báo cáo',
+                        style: tt.titleMedium?.copyWith(
+                            color: Colors.white, fontWeight: FontWeight.w600)),
               ),
             ),
-            const SizedBox(height: AppSpacing.lg),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildReportHistory() {
-    if (_reportHistory.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.history_rounded,
-                size: 64, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: AppSpacing.md),
-            Text('Chưa có báo cáo nào',
-                style: Theme.of(context).textTheme.bodyLarge),
-          ],
-        ),
-      );
-    }
+  Widget _buildReportHistory(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      itemCount: _reportHistory.length,
-      itemBuilder: (context, index) {
-        final report = _reportHistory[index];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: AppSpacing.md),
-          child: _ReportHistoryCard(
-            report: report,
-            onTap: () => _showReportDetail(context, report),
-          ),
-        );
-      },
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.history_rounded,
+              size: 64, color: Theme.of(context).colorScheme.outline),
+          const SizedBox(height: AppSpacing.md),
+          Text('Lịch sử báo cáo', style: tt.titleMedium),
+          const SizedBox(height: AppSpacing.xs),
+          Text('Tính năng đang phát triển...',
+              style: tt.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface.withAlpha(128))),
+        ],
+      ),
     );
   }
 
-  void _submitReport() {
-    if (_formKey.currentState?.validate() ?? false) {
+  void _submitReport() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isSubmitting = true);
+
+    // TODO: Implement API call to submit report to /api/task-reports
+    await Future.delayed(const Duration(seconds: 1));
+
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('Báo cáo đã được gửi cho Researcher!'),
@@ -221,426 +259,13 @@ class _TechnicianReportScreenState extends State<TechnicianReportScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
-      _formKey.currentState?.reset();
-      _workDoneController.clear();
-      _issuesFoundController.clear();
-      _sensorReadingsController.clear();
       setState(() {
+        _workDoneController.clear();
+        _issuesFoundController.clear();
         _selectedTaskId = null;
         _selectedSeverity = 'Low';
-        _showReportHistory = true;
+        _isSubmitting = false;
       });
     }
   }
-
-  void _showReportDetail(BuildContext context, _TaskReport report) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _ReportDetailSheet(report: report),
-    );
-  }
-}
-
-class _SeveritySelector extends StatelessWidget {
-  const _SeveritySelector({
-    required this.selectedSeverity,
-    required this.onChanged,
-  });
-
-  final String selectedSeverity;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final severities = ['Low', 'Medium', 'High', 'Critical'];
-
-    return Wrap(
-      spacing: AppSpacing.sm,
-      runSpacing: AppSpacing.sm,
-      children: severities.map((severity) {
-        final isSelected = selectedSeverity == severity;
-        final color = _getSeverityColor(severity);
-
-        return ChoiceChip(
-          label: Text(severity),
-          selected: isSelected,
-          onSelected: (_) => onChanged(severity),
-          selectedColor: color.withAlpha(38),
-          backgroundColor: Theme.of(context).cardTheme.color,
-          side: BorderSide(
-            color: isSelected ? color : Theme.of(context).colorScheme.outline,
-          ),
-          labelStyle: TextStyle(
-            color: isSelected ? color : Theme.of(context).colorScheme.onSurface,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  Color _getSeverityColor(String severity) {
-    return switch (severity) {
-      'Low' => AppColors.info,
-      'Medium' => AppColors.warning,
-      'High' => const Color(0xFFFF7043),
-      'Critical' => AppColors.error,
-      _ => AppColors.info,
-    };
-  }
-}
-
-class _ImageUploadPlaceholder extends StatefulWidget {
-  @override
-  State<_ImageUploadPlaceholder> createState() => _ImageUploadPlaceholderState();
-}
-
-class _ImageUploadPlaceholderState extends State<_ImageUploadPlaceholder> {
-  final List<String> _photos = [];
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outline.withAlpha(77)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.camera_alt_rounded, size: 16, color: cs.onSurface.withAlpha(153)),
-              const SizedBox(width: AppSpacing.sm),
-              Text('Hình ảnh minh chứng', style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
-              const SizedBox(width: AppSpacing.xs),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.warning.withAlpha(20),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text('Khuyến nghị', style: tt.labelSmall?.copyWith(color: AppColors.warning, fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: [
-              ..._photos.map((p) => Stack(
-                children: [
-                  Container(
-                    width: 72, height: 72,
-                    decoration: BoxDecoration(
-                      color: cs.outline.withAlpha(15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(Icons.image_rounded, size: 28, color: cs.outline.withAlpha(77)),
-                  ),
-                  Positioned(
-                    top: 2, right: 2,
-                    child: GestureDetector(
-                      onTap: () => setState(() => _photos.remove(p)),
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(color: Colors.black.withAlpha(153), shape: BoxShape.circle),
-                        child: const Icon(Icons.close, size: 10, color: Colors.white),
-                      ),
-                    ),
-                  ),
-                ],
-              )),
-              GestureDetector(
-                onTap: () => setState(() => _photos.add('photo_${DateTime.now().millisecondsSinceEpoch}')),
-                child: Container(
-                  width: 72, height: 72,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withAlpha(12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.primary.withAlpha(40)),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_a_photo_rounded, size: 22, color: AppColors.primary.withAlpha(179)),
-                      const SizedBox(height: 2),
-                      Text('Thêm', style: tt.labelSmall?.copyWith(color: AppColors.primary.withAlpha(179), fontSize: 9)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (_photos.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.xs),
-            Text('${_photos.length} hình ảnh đính kèm', style: tt.bodySmall?.copyWith(color: AppColors.success)),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ReportHistoryCard extends StatelessWidget {
-  const _ReportHistoryCard({required this.report, required this.onTap});
-
-  final _TaskReport report;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
-
-    return SNMSCard(
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  report.taskName,
-                  style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm,
-                  vertical: AppSpacing.xs,
-                ),
-                decoration: BoxDecoration(
-                  color: _getSeverityColor(report.severity).withAlpha(25),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  report.severity,
-                  style: tt.labelSmall?.copyWith(
-                    color: _getSeverityColor(report.severity),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            report.workDone,
-            style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(153)),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              Icon(Icons.access_time_rounded,
-                  size: 14, color: cs.onSurface.withAlpha(128)),
-              const SizedBox(width: AppSpacing.xs),
-              Text(
-                _formatDateTime(report.submittedAt),
-                style: tt.labelSmall?.copyWith(
-                  color: cs.onSurface.withAlpha(128),
-                ),
-              ),
-              const Spacer(),
-              Icon(Icons.chevron_right_rounded,
-                  size: 18, color: cs.onSurface.withAlpha(128)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getSeverityColor(String severity) {
-    return switch (severity) {
-      'Low' => AppColors.info,
-      'Medium' => AppColors.warning,
-      'High' => const Color(0xFFFF7043),
-      'Critical' => AppColors.error,
-      _ => AppColors.info,
-    };
-  }
-
-  String _formatDateTime(DateTime dt) {
-    return '${dt.day}/${dt.month}/${dt.year} lúc ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-  }
-}
-
-class _ReportDetailSheet extends StatelessWidget {
-  const _ReportDetailSheet({required this.report});
-
-  final _TaskReport report;
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: cs.outline.withAlpha(77),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('Chi tiết báo cáo', style: tt.headlineSmall),
-            const SizedBox(height: AppSpacing.xl),
-            _DetailRow(label: 'Công việc', value: report.taskName),
-            _DetailRow(label: 'Mức độ', value: report.severity),
-            _DetailRow(
-              label: 'Ngày gửi',
-              value: _formatDateTime(report.submittedAt),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('Công việc đã làm', style: tt.titleSmall),
-            const SizedBox(height: AppSpacing.sm),
-            SNMSCard(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: Text(report.workDone, style: tt.bodyMedium),
-            ),
-            if (report.issuesFound.isNotEmpty) ...[
-              const SizedBox(height: AppSpacing.lg),
-              Text('Vấn đề phát hiện', style: tt.titleSmall),
-              const SizedBox(height: AppSpacing.sm),
-              SNMSCard(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Text(report.issuesFound, style: tt.bodyMedium),
-              ),
-            ],
-            if (report.sensorReadings.isNotEmpty) ...[
-              const SizedBox(height: AppSpacing.lg),
-              Text('Chỉ số cảm biến', style: tt.titleSmall),
-              const SizedBox(height: AppSpacing.sm),
-              SNMSCard(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Text(report.sensorReadings, style: tt.bodyMedium),
-              ),
-            ],
-            const SizedBox(height: AppSpacing.xl),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _formatDateTime(DateTime dt) {
-    return '${dt.day}/${dt.month}/${dt.year} lúc ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-  }
-}
-
-class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              label,
-              style: tt.bodyMedium?.copyWith(
-                color: cs.onSurface.withAlpha(153),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TaskReport {
-  const _TaskReport({
-    required this.id,
-    required this.taskName,
-    required this.workDone,
-    required this.issuesFound,
-    required this.sensorReadings,
-    required this.severity,
-    required this.submittedAt,
-  });
-
-  final String id;
-  final String taskName;
-  final String workDone;
-  final String issuesFound;
-  final String sensorReadings;
-  final String severity;
-  final DateTime submittedAt;
-}
-
-final _mockReportHistory = [
-  _TaskReport(
-    id: 'report-001',
-    taskName: 'Tưới nước - Khu A01',
-    workDone: 'Đã tưới 200ml nước cho từng cây trong khu vực thí nghiệm.',
-    issuesFound: 'Một số cây ở hàng 3 có dấu hiệu thiếu nước.',
-    sensorReadings: 'Nhiệt độ: 28.5°C, Độ ẩm: 65%',
-    severity: 'Low',
-    submittedAt: DateTime.now().subtract(const Duration(days: 2)),
-  ),
-  _TaskReport(
-    id: 'report-002',
-    taskName: 'Kiểm tra cảm biến',
-    workDone: 'Đã kiểm tra và vệ sinh 5 cảm biến trong khu vực.',
-    issuesFound: 'Cảm biến TEMP-Z01-B02 không phản hồi, cần thay thế.',
-    sensorReadings: 'TEMP-Z01-B02: Không hoạt động',
-    severity: 'High',
-    submittedAt: DateTime.now().subtract(const Duration(days: 5)),
-  ),
-];
-
-final _mockTasks = [
-  const _MockTask(id: 'task-001', name: 'Tưới nước - Nhóm Đối Chứng'),
-  const _MockTask(id: 'task-002', name: 'Bón phân NPK - Khu A01'),
-  const _MockTask(id: 'task-003', name: 'Kiểm tra cảm biến nhiệt độ'),
-];
-
-class _MockTask {
-  const _MockTask({required this.id, required this.name});
-  final String id;
-  final String name;
 }

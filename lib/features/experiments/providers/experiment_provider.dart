@@ -1,11 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/experiment_model.dart';
-import '../../../shared/models/growth_task_model.dart';
 import '../../../shared/widgets/notification_card.dart';
 import '../data/experiment_repository.dart';
+import '../../../core/api/services/experiment_api_service.dart';
+import '../../../core/api/models/batch_model.dart';
 
 final experimentRepositoryProvider = Provider<ExperimentRepository>((ref) {
-  return MockExperimentRepository();
+  return ExperimentRepositoryImpl(ref.read(experimentApiServiceProvider));
 });
 
 final experimentsProvider = FutureProvider<List<ExperimentModel>>((ref) async {
@@ -52,97 +53,41 @@ final filteredExperimentsProvider = Provider<AsyncValue<List<ExperimentModel>>>(
   });
 });
 
+// ─── Notifications (placeholder — TODO: connect to real notification API) ───
+
 final notificationsProvider = FutureProvider<List<NotificationItem>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 300));
-  return _mockNotifications;
+  // TODO: Replace with real notification API endpoint when backend provides it
+  return [];
 });
 
-final tasksProvider = FutureProvider<List<TaskModel>>((ref) async {
-  await Future.delayed(const Duration(milliseconds: 300));
-  return _mockTasks;
+// ─── Separate API Providers for Experiment Detail ───────────────────────────────────
+
+/// Stages from API /experiments/{id}/stages
+final experimentStagesProvider = FutureProvider.family<List<ExperimentStage>, String>((ref, experimentId) async {
+  final api = ref.read(experimentApiServiceProvider);
+  return api.getStages(experimentId);
 });
 
-final List<NotificationItem> _mockNotifications = [
-  NotificationItem(
-    id: 'notif-001',
-    title: 'Cam bien ngoai tuyen',
-    message: 'Cam bien TEMP-Z01-B02 da offline hon 2 gio. Can kiem tra ngay.',
-    type: NotificationType.alert,
-    severity: AlertSeverity.high,
-    isRead: false,
-    createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-    linkedRoute: '/farm',
-  ),
-  NotificationItem(
-    id: 'notif-002',
-    title: 'Bao cao task tu Vo Thi Lan',
-    message: 'Sinh vien Vo Thi Lan da hoan thanh "Quan sat tang truong - Ngay 26/4".',
-    type: NotificationType.taskUpdate,
-    isRead: false,
-    createdAt: DateTime.now().subtract(const Duration(hours: 5)),
-    linkedRoute: '/experiments/exp-001',
-  ),
-  NotificationItem(
-    id: 'notif-003',
-    title: 'Yeu cau thuc nghiem duoc duyet',
-    message: 'Yeu cau EXP-REQ-003 da duoc Farm Manager duyet. Thuc nghiem moi da duoc tao.',
-    type: NotificationType.system,
-    isRead: true,
-    createdAt: DateTime.now().subtract(const Duration(days: 1)),
-    linkedRoute: '/experiments/exp-002',
-  ),
-  NotificationItem(
-    id: 'notif-004',
-    title: 'Nhiet do vuot nguong',
-    message: 'Luong B01-Z01: Nhiet do 34.2C vuot nguong toi da (32C). Muc do: Cao.',
-    type: NotificationType.alert,
-    severity: AlertSeverity.high,
-    isRead: false,
-    createdAt: DateTime.now().subtract(const Duration(minutes: 30)),
-    linkedRoute: '/farm',
-  ),
-];
+/// Groups from API /experiments/{id}/groups
+final experimentGroupsProvider = FutureProvider.family<List<ExperimentGroup>, String>((ref, experimentId) async {
+  final api = ref.read(experimentApiServiceProvider);
+  return api.getGroups(experimentId);
+});
 
-final List<TaskModel> _mockTasks = [
-  TaskModel(
-    id: 'task-001',
-    taskName: 'Quan sat tang truong Nhom Doi Chung - Tuan 4',
-    taskType: TaskType.observation,
-    experimentId: 'exp-001',
-    stageId: 'stage-003',
-    batchId: 'batch-ctrl-01',
-    status: TaskStatus.inProgress,
-    assignedTo: 'usr-student-001',
-    dueDate: DateTime(2024, 4, 30),
-    requiredSkills: const [
-      TaskSkillRequirement(skillName: 'Quan sat tang truong', requiredLevel: 2, isMandatory: true),
-      TaskSkillRequirement(skillName: 'Ghi chep du lieu', requiredLevel: 2, isMandatory: true),
-    ],
-    aiSuggestion: const AITaskSuggestion(
-      suggestedAssigneeId: 'usr-student-001',
-      matchScore: 87.5,
-      reason: 'Vo Thi Lan co ky nang phu hop. Hien co 1 task dang chay.',
-      reviewStatus: 'accepted',
-    ),
-  ),
-  TaskModel(
-    id: 'task-002',
-    taskName: 'Tuoi nho giot Nhom Thuc Nghiem',
-    taskType: TaskType.watering,
-    experimentId: 'exp-001',
-    stageId: 'stage-003',
-    batchId: 'batch-trt-01',
-    status: TaskStatus.pending,
-    assignedTo: null,
-    dueDate: DateTime(2024, 4, 28),
-    requiredSkills: const [
-      TaskSkillRequirement(skillName: 'Tuoi tieu tu dong', requiredLevel: 3, isMandatory: true),
-    ],
-    aiSuggestion: const AITaskSuggestion(
-      suggestedAssigneeId: 'usr-technician-001',
-      matchScore: 94.2,
-      reason: 'Le Thi Huong co ky nang phu hop. Hien co 2 tasks.',
-      reviewStatus: 'suggested',
-    ),
-  ),
-];
+/// Design from API /experiments/{id}/design
+final experimentDesignProvider = FutureProvider.family<ExperimentDesign?, String>((ref, experimentId) async {
+  final api = ref.read(experimentApiServiceProvider);
+  return api.getDesign(experimentId);
+});
+
+/// Measurement Definitions from API /experiments/{id}/measurements
+final experimentMeasurementsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, experimentId) async {
+  final api = ref.read(experimentApiServiceProvider);
+  return api.getMeasurementDefinitions(experimentId);
+});
+
+/// Batches from API /batches/experiments/{experimentId}
+final experimentBatchesProvider = FutureProvider.family<List<BatchModel>, String>((ref, experimentId) async {
+  final api = ref.read(experimentApiServiceProvider);
+  return api.getBatchesByExperiment(experimentId);
+});
