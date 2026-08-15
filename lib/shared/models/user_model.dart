@@ -1,4 +1,4 @@
-enum UserRole { admin, researcher, farmManager, technician, student }
+enum UserRole { researcher, technician, student }
 
 class UserSkill {
   const UserSkill({required this.skillName, required this.proficiencyLevel});
@@ -24,11 +24,9 @@ class UserModel {
   final List<UserSkill> skills;
 
   String get roleLabel => switch (role) {
-    UserRole.admin        => 'Admin',
-    UserRole.researcher   => 'Researcher',
-    UserRole.farmManager => 'Farm Manager',
-    UserRole.technician  => 'Technician',
-    UserRole.student     => 'Student',
+    UserRole.researcher => 'Researcher',
+    UserRole.technician => 'Technician',
+    UserRole.student => 'Student',
   };
 
   String get initials {

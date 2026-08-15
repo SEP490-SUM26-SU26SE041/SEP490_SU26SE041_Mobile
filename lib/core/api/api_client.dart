@@ -11,7 +11,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// - Android emulator → 10.0.2.2 (localhost của máy host)
 /// - iOS simulator   → localhost hoặc 10.0.2.2
 /// - Web/Production  → IP/domain thật
-const _baseUrl = 'https://10.0.2.2:7048/api';
+const _baseUrl = 'https://smartfarm-sep490-api-c3emdvfmdefybacs.eastasia-01.azurewebsites.net/api';
 
 final dioProvider = Provider<Dio>((ref) {
   final dio = Dio(_dioOptions);

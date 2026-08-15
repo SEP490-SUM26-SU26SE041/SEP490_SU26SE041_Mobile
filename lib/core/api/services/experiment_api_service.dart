@@ -149,12 +149,28 @@ class ExperimentApiService {
   // ─── Measurement Definitions ────────────────────────────────────────────────
 
   /// GET /experiments/{id}/measurements
+  /// Response có thể là:
+  ///   - `[{...}, {...}]` (list trần)
+  ///   - `{ "data": [{...}, {...}] }` (wrapped)
+  ///   - `{ "items": [{...}, {...}] }` (wrapped, alias)
+  ///   - `{ "succeeded": true, "data": [...] }` (envelope)
   Future<List<Map<String, dynamic>>> getMeasurementDefinitions(String experimentId) async {
     final res = await _dio.get(ApiEndpoints.experimentMeasurements(experimentId));
-    if (res.data is List) {
-      return (res.data as List).cast<Map<String, dynamic>>();
+    final data = res.data;
+    List<dynamic>? extractList(dynamic v) {
+      if (v is List) return v;
+      if (v is Map<String, dynamic>) {
+        for (final key in const ['data', 'items', 'result', 'records']) {
+          final inner = v[key];
+          if (inner is List) return inner;
+        }
+      }
+      return null;
     }
-    return [];
+
+    final list = extractList(data);
+    if (list == null) return [];
+    return list.whereType<Map<String, dynamic>>().toList();
   }
 
   /// POST /experiments/{id}/measurements

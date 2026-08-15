@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/api/models/measurement_definition_model.dart';
-import '../../../../core/api/services/measurement_record_api_service.dart' as measurement_api;
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/models/growth_task_model.dart';
-import '../../../../features/tasks/providers/measurement_record_providers.dart';
+import '../../../../features/tasks/data/measurement_bridge.dart';
+import '../../../tasks/data/task_report_submit_service.dart';
+import '../../../tasks/providers/measurement_batch_providers.dart';
+import '../../../tasks/providers/measurement_record_providers.dart';
 
-/// Bottom sheet ghi nhận chỉ số tăng trưởng (measurement record).
-/// Lấy measurement definitions từ experiment và cho phép nhập value.
+/// Bottom sheet ghi nhận chỉ số dùng [BridgeOutput] mới (bulk path).
 Future<void> showQuickMeasurementSheet(BuildContext context, TaskModel task) {
   return showModalBottomSheet(
     context: context,
@@ -23,13 +24,16 @@ class _QuickMeasurementSheet extends ConsumerStatefulWidget {
   final TaskModel task;
 
   @override
-  ConsumerState<_QuickMeasurementSheet> createState() => _QuickMeasurementSheetState();
+  ConsumerState<_QuickMeasurementSheet> createState() =>
+      _QuickMeasurementSheetState();
 }
 
-class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> {
+class _QuickMeasurementSheetState
+    extends ConsumerState<_QuickMeasurementSheet> {
   final Map<String, TextEditingController> _valueControllers = {};
   final _noteController = TextEditingController();
   bool _isSubmitting = false;
+  String? _activeError;
 
   @override
   void dispose() {
@@ -40,18 +44,32 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
     super.dispose();
   }
 
+  List<MeasurementDefinitionModel> _watchEffectiveDefs() {
+    final raw =
+        ref.watch(measurementDefinitionsProvider(widget.task.experimentId));
+    final effective = ref.watch(
+      effectiveMeasurementDefinitionsProvider(
+        EffectiveDefinitionsParam(
+          definitions: raw.value ?? const [],
+          experimentId: widget.task.experimentId,
+          taskId: widget.task.id,
+          batchId: widget.task.batchId,
+        ),
+      ),
+    );
+    return effective.value ?? const [];
+  }
+
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
     final task = widget.task;
-    final experimentId = task.experimentId;
 
-    if (experimentId.isEmpty) {
-      return _wrap(cs, tt, const _ErrorContent(message: 'Task chưa có experimentId, không thể ghi nhận chỉ số.'));
+    if (task.experimentId.isEmpty) {
+      return _wrap(cs, tt,
+          const _ErrorContent(message: 'Task chưa có experimentId.'));
     }
-
-    final defsAsync = ref.watch(measurementDefinitionsProvider(experimentId));
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -68,8 +86,7 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
             children: [
               Center(
                 child: Container(
-                  width: 40,
-                  height: 4,
+                  width: 40, height: 4,
                   decoration: BoxDecoration(
                     color: cs.onSurface.withAlpha(40),
                     borderRadius: BorderRadius.circular(2),
@@ -80,21 +97,24 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
               Row(
                 children: [
                   Container(
-                    width: 44,
-                    height: 44,
+                    width: 44, height: 44,
                     decoration: BoxDecoration(
                       color: AppColors.info.withAlpha(25),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.straighten_rounded, color: AppColors.info, size: 22),
+                    child: const Icon(Icons.straighten_rounded,
+                        color: AppColors.info, size: 22),
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Ghi nhận chỉ số', style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                          Text(task.taskName, style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(153)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Text('Ghi nhận chỉ số',
+                            style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                        Text(task.taskName,
+                            style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(153)),
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
                       ],
                     ),
                   ),
@@ -109,11 +129,12 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.info_outline_rounded, color: AppColors.info, size: 16),
+                    const Icon(Icons.info_outline_rounded,
+                        color: AppColors.info, size: 16),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Text(
-                        'Nhập giá trị đo được cho từng chỉ số của thí nghiệm',
+                        'Nhập giá trị đo được cho từng chỉ số của nhóm ${task.batchCode ?? ''}',
                         style: tt.bodySmall?.copyWith(color: AppColors.info),
                       ),
                     ),
@@ -121,21 +142,16 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
                 ),
               ),
               const SizedBox(height: AppSpacing.lg),
-              defsAsync.when(
-                loading: () => const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-                error: (e, _) => _ErrorContent(message: 'Lỗi tải chỉ số: $e'),
-                data: (defs) {
-                  if (defs.isEmpty) {
-                    return _ErrorContent(
-                      message: 'Thí nghiệm này chưa có chỉ số đo lường. Vui lòng liên hệ Researcher để tạo.',
-                    );
-                  }
-                  return _buildForm(defs, tt, cs);
-                },
-              ),
+              Builder(builder: (context) {
+                final defs = _watchEffectiveDefs();
+                if (defs.isEmpty) {
+                  return const _ErrorContent(
+                    message:
+                        'Thí nghiệm này chưa có chỉ số, hoặc không tìm thấy chỉ số cho nhóm batch của task.',
+                  );
+                }
+                return _buildForm(defs, tt, cs);
+              }),
             ],
           ),
         ),
@@ -154,7 +170,8 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
     );
   }
 
-  Widget _buildForm(List<MeasurementDefinitionModel> defs, TextTheme tt, ColorScheme cs) {
+  Widget _buildForm(
+      List<MeasurementDefinitionModel> defs, TextTheme tt, ColorScheme cs) {
     for (final d in defs) {
       _valueControllers.putIfAbsent(d.id, () => TextEditingController());
     }
@@ -165,25 +182,36 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
         children: [
           ...defs.map((d) => _buildField(d, tt, cs)),
           const SizedBox(height: AppSpacing.lg),
-          Text('Ghi chú (tùy chọn)', style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
+          Text('Ghi chú (tùy chọn)',
+              style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
           const SizedBox(height: AppSpacing.sm),
           TextFormField(
             controller: _noteController,
             maxLines: 2,
             decoration: InputDecoration(
-              hintText: 'Nhập ghi chú...',
+              hintText: 'Điều kiện đo, thời tiết...',
               filled: true,
               fillColor: cs.surfaceContainerHighest.withAlpha(128),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
             ),
           ),
+          if (_activeError != null) ...[
+            const SizedBox(height: AppSpacing.md),
+            _ErrorBanner(message: _activeError!),
+          ],
           const SizedBox(height: AppSpacing.xl),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: _isSubmitting ? null : () => Navigator.pop(context),
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed:
+                      _isSubmitting ? null : () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
                   child: const Text('Huỷ'),
                 ),
               ),
@@ -193,7 +221,11 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
                 child: FilledButton.icon(
                   onPressed: _isSubmitting ? null : () => _submit(defs),
                   icon: _isSubmitting
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      ? const SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                        )
                       : const Icon(Icons.save_rounded, size: 18),
                   label: Text(_isSubmitting ? 'Đang lưu...' : 'Lưu chỉ số'),
                   style: FilledButton.styleFrom(
@@ -209,7 +241,8 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
     );
   }
 
-  Widget _buildField(MeasurementDefinitionModel d, TextTheme tt, ColorScheme cs) {
+  Widget _buildField(
+      MeasurementDefinitionModel d, TextTheme tt, ColorScheme cs) {
     final controller = _valueControllers[d.id]!;
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
@@ -219,111 +252,169 @@ class _QuickMeasurementSheetState extends ConsumerState<_QuickMeasurementSheet> 
           Row(
             children: [
               Expanded(
-                child: Text(d.metricName, style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
+                child: Text(d.metricName,
+                    style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
               ),
               if (d.targetValue != null)
-                Text(
-                  'Mục tiêu: ${d.targetValue} ${d.unit ?? ''}',
-                  style: tt.labelSmall?.copyWith(color: cs.onSurface.withAlpha(128)),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withAlpha(20),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'Mục tiêu: ${d.targetValue} ${d.unit ?? ''}',
+                    style: tt.labelSmall?.copyWith(color: AppColors.success),
+                  ),
                 ),
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
-          TextFormField(
-            controller: controller,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              hintText: 'Nhập giá trị...',
-              suffixText: d.unit ?? '',
-              filled: true,
-              fillColor: cs.surfaceContainerHighest.withAlpha(128),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-            ),
-            validator: (v) => (v == null || v.isEmpty) ? 'Vui lòng nhập' : null,
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (context, value, _) {
+              final err = localValidateValue(d, value.text);
+              final status = getValueStatus(d, value.text);
+              return TextFormField(
+                controller: controller,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Nhập giá trị...',
+                  suffixText: d.unit ?? '',
+                  errorText: err,
+                  filled: true,
+                  fillColor: cs.surfaceContainerHighest.withAlpha(128),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: _statusIcon(status),
+                ),
+              );
+            },
           ),
         ],
       ),
     );
   }
 
+  Widget? _statusIcon(ValueStatus status) {
+    switch (status) {
+      case ValueStatus.exceeded:
+        return const Padding(
+          padding: EdgeInsets.only(right: 8),
+          child: Icon(Icons.check_circle_rounded, color: AppColors.success, size: 20),
+        );
+      case ValueStatus.close:
+        return const Padding(
+          padding: EdgeInsets.only(right: 8),
+          child: Icon(Icons.bolt_rounded, color: AppColors.warning, size: 20),
+        );
+      case ValueStatus.below:
+        return const Padding(
+          padding: EdgeInsets.only(right: 8),
+          child: Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 20),
+        );
+      case ValueStatus.ok:
+      case ValueStatus.unknown:
+        return null;
+    }
+  }
+
   Future<void> _submit(List<MeasurementDefinitionModel> defs) async {
     final task = widget.task;
     if (task.batchId == null || task.batchId!.isEmpty || task.stageId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Task chưa có batchId/stageId, không thể ghi nhận.'), backgroundColor: AppColors.error),
-      );
+      setState(() {
+        _activeError = 'Task chưa có batchId/stageId, không thể ghi nhận.';
+        _isSubmitting = false;
+      });
       return;
     }
 
-    final entries = <_Entry>[];
+    final resultData = <String, String>{};
+    String? firstErr;
     for (final d in defs) {
       final c = _valueControllers[d.id];
       final v = c?.text.trim() ?? '';
       if (v.isEmpty) continue;
-      final num = double.tryParse(v.replaceAll(',', '.'));
-      if (num == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('"${d.metricName}" không phải số hợp lệ'), backgroundColor: AppColors.error),
-        );
-        return;
+      final err = localValidateValue(d, v);
+      if (err != null) {
+        firstErr ??= err;
+        continue;
       }
-      entries.add(_Entry(def: d, value: num));
+      resultData['def_${d.id}'] = v;
     }
 
-    if (entries.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng nhập ít nhất 1 chỉ số'), backgroundColor: AppColors.warning),
-      );
+    if (resultData.isEmpty) {
+      setState(() {
+        _activeError = firstErr ?? 'Vui lòng nhập ít nhất 1 chỉ số';
+        _isSubmitting = false;
+      });
       return;
     }
 
     setState(() => _isSubmitting = true);
     try {
       final note = _noteController.text.trim();
-      for (final e in entries) {
-        final dto = measurement_api.CreateMeasurementDto(
-          experimentId: task.experimentId,
-          experimentStageId: task.stageId!,
-          batchId: task.batchId!,
-          measurementDefinitionId: e.def.id,
-          value: e.value,
-          textValue: note.isNotEmpty ? note : null,
-          measuredAt: DateTime.now(),
-        );
-        await ref.read(createMeasurementRecordProvider(dto).future);
-      }
-      ref.invalidate(measurementRecordsByBatchProvider(task.batchId!));
+      final taskCtx = TaskGroupContext(
+        experimentId: task.experimentId.isEmpty ? null : task.experimentId,
+        experimentStageId: task.stageId,
+        batchId: task.batchId,
+        taskType: null,
+      );
+      final bridge = buildBridgeOutput(
+        task: taskCtx,
+        resultData: resultData,
+        effectiveDefinitions: defs,
+        meta: BridgeExtraMeta(notes: note),
+      );
+
+      final params = SubmitParams(
+        taskId: task.id,
+        reportText: note.isNotEmpty
+            ? 'Đã ghi nhận ${bridge.bulk?.items.length ?? 0} chỉ số. $note'
+            : 'Đã ghi nhận ${bridge.bulk?.items.length ?? 0} chỉ số.',
+        resultData: resultData,
+        images: const [],
+        experimentId: task.experimentId.isEmpty ? null : task.experimentId,
+        batchId: task.batchId,
+        effectiveDefinitions: defs,
+        bridgeOutput: bridge,
+        markComplete: false,
+        hasNewContent: true,
+      );
+      final outcome =
+          await ref.read(taskReportSubmitServiceProvider).submitAndOptionallyComplete(params);
+
+      ref.invalidate(measurementRecordsByBatchProvider(task.batchId ?? ''));
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Đã lưu ${entries.length} chỉ số thành công!'),
-            backgroundColor: AppColors.info,
+            content: Text(outcome.toUserMessage()),
+            backgroundColor: outcome.mode == SubmitMode.error
+                ? AppColors.error
+                : AppColors.success,
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isSubmitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi: $e'), backgroundColor: AppColors.error),
-        );
+        setState(() {
+          _isSubmitting = false;
+          _activeError = '$e';
+        });
       }
     }
   }
 }
 
-class _Entry {
-  final MeasurementDefinitionModel def;
-  final double value;
-  _Entry({required this.def, required this.value});
-}
-
 class _ErrorContent extends StatelessWidget {
   const _ErrorContent({required this.message});
   final String message;
-
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
@@ -334,15 +425,46 @@ class _ErrorContent extends StatelessWidget {
         children: [
           Icon(Icons.error_outline_rounded, size: 40, color: cs.onSurface.withAlpha(102)),
           const SizedBox(height: AppSpacing.md),
-          Text(message, textAlign: TextAlign.center, style: tt.bodyMedium?.copyWith(color: cs.onSurface.withAlpha(153))),
+          Text(message,
+              textAlign: TextAlign.center,
+              style: tt.bodyMedium?.copyWith(color: cs.onSurface.withAlpha(153))),
           const SizedBox(height: AppSpacing.lg),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
               onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
               child: const Text('Đóng'),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message});
+  final String message;
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.error.withAlpha(15),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded,
+              color: AppColors.error, size: 18),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(message,
+                style: tt.bodySmall?.copyWith(color: AppColors.error)),
           ),
         ],
       ),

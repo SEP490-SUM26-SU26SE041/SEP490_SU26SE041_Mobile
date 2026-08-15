@@ -36,6 +36,7 @@ internal.TaskType _taskType(api.TaskType t) {
     api.TaskType.fertilizing => internal.TaskType.fertilizing,
     api.TaskType.observation => internal.TaskType.observation,
     api.TaskType.inspection  => internal.TaskType.inspection,
+    api.TaskType.measurement => internal.TaskType.observation,
     api.TaskType.harvest     => internal.TaskType.inspection,
     api.TaskType.other       => internal.TaskType.inspection,
   };

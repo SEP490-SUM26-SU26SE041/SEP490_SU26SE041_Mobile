@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../mock/mock_farm.dart';
 import '../../../shared/models/farm_model.dart';
 import '../../../shared/widgets/snms_card.dart';
 
@@ -238,15 +237,7 @@ class TechnicianIoTScreen extends ConsumerWidget {
   }
 
   List<SensorModel> _getAllSensors() {
-    final sensors = <SensorModel>[];
-    for (final area in mockFarm.areas) {
-      for (final zone in area.zones) {
-        for (final bed in zone.beds) {
-          sensors.addAll(bed.sensors);
-        }
-      }
-    }
-    return sensors;
+    return [];
   }
 }
 

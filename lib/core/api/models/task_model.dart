@@ -103,7 +103,7 @@ class TaskModel {
   };
 
   bool get isOverdue =>
-      status == TaskStatus.pending &&
+      (status == TaskStatus.pending || status == TaskStatus.overdue) &&
       dueDate.isBefore(DateTime.now());
 }
 
@@ -209,6 +209,7 @@ enum TaskType {
   observation('Observation', 'Quan sát'),
   inspection('Inspection', 'Kiểm tra'),
   harvest('Harvest', 'Thu hoạch'),
+  measurement('Measurement', 'Đo lường'),
   other('Other', 'Khác');
 
   const TaskType(this.value, this.labelVi);
@@ -232,7 +233,8 @@ enum TaskStatus {
   rejected('Rejected'),
   resigned('Resigned'),
   reassigned('Reassigned'),
-  cancelled('Cancelled');
+  cancelled('Cancelled'),
+  overdue('Overdue');
 
   const TaskStatus(this.value);
   final String value;

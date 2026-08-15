@@ -15,8 +15,8 @@ class TaskReportRepository {
   Future<TaskReportModel> submitReport(CreateTaskReportDto dto) =>
       _api.submitReport(dto);
 
-  Future<TaskReportModel?> getReportByTask(String taskId) =>
-      _api.getReportByTask(taskId);
+  Future<List<TaskReportModel>> getReportsByTask(String taskId) =>
+      _api.getReportsByTask(taskId);
 
   Future<List<TaskReportModel>> getReportsByBatch(String batchId) =>
       _api.getReportsByBatch(batchId);

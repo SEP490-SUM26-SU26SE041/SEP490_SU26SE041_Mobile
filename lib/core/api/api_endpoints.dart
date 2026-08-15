@@ -44,8 +44,11 @@ abstract class ApiEndpoints {
 
   // Measurement records
   static const measurementRecords = '/measurement-records';
+  static const measurementRecordsBulk = '/measurement-records/bulk';
   static String measurementByBatch(String batchId) =>
       '/measurement-records/batch/$batchId';
+  static String measurementDefinitionValidate(String definitionId) =>
+      '/measurement-definitions/$definitionId/validate';
 
   // Admin
   static const sweepOverdue = '/tasks/admin/sweep-overdue';
@@ -68,6 +71,14 @@ abstract class ApiEndpoints {
   static String experimentMeasurements(String id) => '/experiments/$id/measurements';
   static String experimentSchedules(String id) => '/experiments/$id/schedules';
 
+  // Stage statistics
+  static String stageStatistics(String stageId) =>
+      '/experiments/stages/$stageId/statistics';
+  static String stageStatisticsExport(String stageId) =>
+      '/experiments/stages/$stageId/statistics/export';
+  static String experimentStatistics(String experimentId) =>
+      '/experiments/$experimentId/statistics';
+
   // Stages
   static String stageById(String stageId) => '/experiments/stages/$stageId';
 
@@ -76,6 +87,19 @@ abstract class ApiEndpoints {
       '/batches/experiments/$experimentId';
   static String batchById(String batchId) => '/batches/$batchId';
   static const batches = '/batches';
+
+  // Notifications
+  static const notifications = '/Notifications';
+  static const notificationsUnreadCount = '/Notifications/unread-count';
+  static const notificationsReadAll = '/Notifications/read-all';
+  static String notificationById(String id) => '/Notifications/$id';
+  static String notificationMarkRead(String id) => '/Notifications/$id/read';
+
+  // Dashboard
+  static const dashboardOverview = '/dashboard/overview';
+  static const dashboardKpis = '/dashboard/kpis';
+  static const dashboardAlerts = '/dashboard/alerts';
+  static const dashboardPersonnelPerformance = '/dashboard/personnel/performance';
 
   // Procedure Templates
   static const procedureTemplates = '/experiments/procedure-templates';

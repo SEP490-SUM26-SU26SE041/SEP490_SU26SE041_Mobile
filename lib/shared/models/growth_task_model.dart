@@ -1,6 +1,27 @@
 import '../../core/utils/date_utils.dart';
 import 'experiment_model.dart';
 
+class GrowthRecordModel {
+  const GrowthRecordModel({
+    required this.id,
+    required this.batchId,
+    required this.plantHeight,
+    required this.leafCount,
+    required this.recordedAt,
+    required this.plantStatus,
+    this.note,
+    this.leafColor,
+  });
+  final String id;
+  final String batchId;
+  final double plantHeight;
+  final int leafCount;
+  final DateTime recordedAt;
+  final String plantStatus;
+  final String? note;
+  final String? leafColor;
+}
+
 class TaskSkillRequirement {
   const TaskSkillRequirement({
     required this.skillName,
@@ -56,6 +77,7 @@ class TaskReportModel {
     required this.submittedAt,
     this.submittedBy,
     this.images = const [],
+    this.rawResultData,
   });
   final String id;
   final String taskId;
@@ -65,7 +87,12 @@ class TaskReportModel {
   final String? submittedBy;
   final List<TaskImageModel> images;
 
+  /// Raw JSON từ BE `resultData` — dùng cho debug / display lại.
+  /// Luôn là Map<String, dynamic> (stringifiable).
+  final Map<String, dynamic>? rawResultData;
+
   factory TaskReportModel.fromJson(Map<String, dynamic> json) {
+    final raw = json['resultData'];
     return TaskReportModel(
       id: json['id'] ?? '',
       taskId: json['taskId'] ?? json['taskId'] ?? '',
@@ -76,6 +103,7 @@ class TaskReportModel {
       images: (json['images'] as List<dynamic>?)
           ?.map((e) => TaskImageModel.fromJson(e))
           .toList() ?? [],
+      rawResultData: raw is Map ? Map<String, dynamic>.from(raw) : null,
     );
   }
 }

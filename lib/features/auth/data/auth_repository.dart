@@ -1,32 +1,18 @@
-import 'package:flutter_application_2/shared/models/user_model.dart';
-import 'package:flutter_application_2/mock/mock_users.dart';
-
 abstract class AuthRepository {
-  Future<UserModel> login(String email, String password);
+  Future<dynamic> login(String email, String password);
   Future<void> logout();
-  Future<UserModel?> getCurrentUser();
+  Future<dynamic> getCurrentUser();
 }
 
 class MockAuthRepository implements AuthRepository {
   @override
-  Future<UserModel> login(String email, String password) async {
-    await Future.delayed(const Duration(seconds: 1));
-    final user = mockUsers.where(
-      (u) => u.email.toLowerCase() == email.toLowerCase()
-    ).firstOrNull;
-    if (user == null) {
-      throw Exception('Invalid email or password');
-    }
-    return user;
+  Future<dynamic> login(String email, String password) async {
+    throw UnimplementedError('Use AuthApiRepository for login');
   }
 
   @override
-  Future<void> logout() async {
-    await Future.delayed(const Duration(milliseconds: 300));
-  }
+  Future<void> logout() async {}
 
   @override
-  Future<UserModel?> getCurrentUser() async {
-    return null;
-  }
+  Future<dynamic> getCurrentUser() async => null;
 }

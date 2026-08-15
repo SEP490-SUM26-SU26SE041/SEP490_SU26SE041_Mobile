@@ -1,15 +1,20 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/models/task_model.dart' as api;
-import '../../../core/api/models/task_report_model.dart' as report_model;
-import '../../../core/api/services/task_report_api_service.dart' as report_api;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../shared/widgets/snms_card.dart';
+import '../../../shared/models/growth_task_model.dart' as internal;
+import '../../tasks/data/task_report_constants.dart';
+import '../../tasks/data/task_report_submit_service.dart';
 import '../../tasks/providers/task_providers.dart';
-import '../../tasks/providers/task_report_providers.dart' as report_providers;
+import '../../tasks/presentation/widgets/task_image_picker.dart';
+import '../../tasks/presentation/widgets/measurement_recording_sheet.dart';
+import '../../tasks/presentation/widgets/modern_quick_report_sheet.dart';
+import '../../tasks/presentation/widgets/task_visual.dart';
 
 class TechnicianTaskDetailScreen extends ConsumerStatefulWidget {
   const TechnicianTaskDetailScreen({super.key, required this.taskId});
@@ -25,7 +30,10 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
   final _waterController = TextEditingController();
   final _fertilizerController = TextEditingController();
   final _noteController = TextEditingController();
+  final Map<String, TextEditingController> _fieldControllers = {};
+  String _selectedHealth = 'Tốt';
   bool _isSubmitting = false;
+  List<File> _selectedImages = [];
 
   @override
   void dispose() {
@@ -270,7 +278,7 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
               Text('Hạn hoàn thành', style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(128))),
               const Spacer(),
               Text(
-                formatDate(task.dueDate),
+                formatDueDate(task.dueDate),
                 style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w600),
               ),
             ],
@@ -465,6 +473,12 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
                 ),
                 validator: (v) => v?.isEmpty == true ? 'Vui lòng nhập ghi chú' : null,
               ),
+              const SizedBox(height: AppSpacing.md),
+              TaskImagePicker(
+                images: _selectedImages,
+                onImagesChanged: (imgs) => setState(() => _selectedImages = imgs),
+                isUploading: _isSubmitting,
+              ),
             ],
           ),
         ),
@@ -474,11 +488,94 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
 
   Widget _buildActionButtons(api.TaskModel task, TextTheme tt, ColorScheme cs) {
     final isPending = task.status == api.TaskStatus.pending;
+    final typeSpec = getTaskVisualSpec(task.taskType);
 
-    return Row(
+    return Column(
       children: [
-        if (isPending)
-          Expanded(
+        // Big primary CTA — open modern Quick Report sheet.
+        SizedBox(
+          width: double.infinity,
+          height: 56,
+          child: FilledButton.icon(
+            onPressed: _isSubmitting
+                ? null
+                : () async {
+                    await showApiQuickReportSheet(context, task);
+                    if (mounted) {
+                      ref.invalidate(taskReportByTaskProvider(task.id));
+                      ref.invalidate(taskDetailProvider(task.id));
+                    }
+                  },
+            style: FilledButton.styleFrom(
+              backgroundColor: typeSpec.color,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              elevation: 0,
+            ),
+            icon: const Icon(Icons.flash_on_rounded,
+                size: 18, color: Colors.white),
+            label: Text(
+              'Báo cáo nhanh · ${typeSpec.label}',
+              style: tt.titleSmall
+                  ?.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => showMeasurementRecordingSheet(
+                  context,
+                  task,
+                  onMeasurementComplete: () {
+                    ref.invalidate(taskReportByTaskProvider(task.id));
+                    ref.invalidate(taskDetailProvider(task.id));
+                    if (mounted) context.pop();
+                  },
+                ),
+                icon: const Icon(Icons.straighten_rounded, size: 18),
+                label: const Text('Bảng đo'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isSubmitting ? null : () => _submitReport(
+                    task.id, task.taskType,
+                    experimentId: task.experimentId,
+                    batchId: task.batchId,
+                  ),
+                icon: _isSubmitting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.check_circle_rounded, size: 18, color: Colors.white),
+                label: Text('Hoàn thành',
+                    style: tt.labelLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (isPending) ...[
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: _isSubmitting ? null : () => _startTask(task.id),
               icon: const Icon(Icons.play_arrow_rounded),
@@ -489,77 +586,128 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
               ),
             ),
           ),
-        if (isPending) const SizedBox(width: AppSpacing.md),
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: _isSubmitting ? null : () => _submitReport(task.id, task.taskType),
-            icon: _isSubmitting
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Icon(Icons.check_circle_rounded, size: 18, color: Colors.white),
-            label: Text('Hoàn thành',
-                style: tt.labelLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ],
+        if (task.batchId != null && task.batchId!.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => context.push(
+                '/growth/${task.batchId}?batchCode=${Uri.encodeComponent(task.batchCode ?? task.batchId!)}&experimentId=${task.experimentId}',
+              ),
+              icon: const Icon(Icons.trending_up_rounded, size: 18),
+              label: const Text('Xem chỉ số tăng trưởng'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.success,
+                side: BorderSide(color: AppColors.success.withAlpha(80)),
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }
 
   Widget _buildReportView(api.TaskModel task, TextTheme tt, ColorScheme cs) {
-    final reportAsync = ref.watch(report_providers.taskReportByTaskProvider(task.id));
+    final reportAsync = ref.watch(taskReportByTaskProvider(task.id));
     return reportAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => SNMSCard(
         child: Text('Chưa có báo cáo', style: tt.bodyMedium),
       ),
-      data: (report) {
-        if (report == null) {
+      data: (reports) {
+        if (reports.isEmpty) {
           return SNMSCard(
             child: Row(
               children: [
                 Icon(Icons.info_outline_rounded, color: AppColors.info),
                 const SizedBox(width: AppSpacing.md),
-                Expanded(child: Text('Công việc đã hoàn thành', style: tt.bodyMedium)),
+                Expanded(child: Text('Công việc chưa có báo cáo nào', style: tt.bodyMedium)),
               ],
             ),
           );
         }
-        return SNMSCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.check_circle_rounded, color: AppColors.success),
-                  const SizedBox(width: AppSpacing.sm),
-                  Text('Báo cáo đã gửi',
-                      style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              if (report.reporterName != null)
-                Text('Người gửi: ${report.reporterName}',
-                    style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(128))),
-              Text('Thời gian: ${formatDateTime(report.reportedAt)}',
-                  style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(128))),
-              if (report.reportText.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Text(report.reportText, style: tt.bodyMedium),
+        // Hiển thị danh sách lịch sử báo cáo (mới nhất trên đầu)
+        final sorted = [...reports]
+          ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.history_rounded, color: AppColors.success),
+                const SizedBox(width: AppSpacing.sm),
+                Text(
+                  'Lịch sử báo cáo (${sorted.length})',
+                  style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
               ],
-            ],
-          ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ...sorted.map((r) => _buildReportCard(r, tt, cs)),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildReportCard(internal.TaskReportModel r, TextTheme tt, ColorScheme cs) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: SNMSCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: AppColors.success, size: 18),
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  formatDateTime(r.submittedAt),
+                  style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(153)),
+                ),
+                const Spacer(),
+                if (r.submittedBy != null)
+                  Text(
+                    '· ${r.submittedBy}',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(128)),
+                  ),
+              ],
+            ),
+            if (r.description.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Text(r.description, style: tt.bodyMedium),
+            ],
+            if (r.rawResultData != null && r.rawResultData!.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.xs),
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: r.rawResultData!.entries
+                    .where((e) => e.key != 'additionalNotes')
+                    .map((e) => Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                            vertical: AppSpacing.xs,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.success.withAlpha(15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${e.key}: ${e.value}',
+                            style: tt.labelSmall?.copyWith(color: AppColors.success),
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -585,7 +733,10 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
     }
   }
 
-  Future<void> _submitReport(String taskId, api.TaskType taskType) async {
+  Future<void> _submitReport(String taskId, api.TaskType taskType, {
+    String? experimentId,
+    String? batchId,
+  }) async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSubmitting = true);
 
@@ -593,24 +744,38 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
       final reportText = _buildReportText(taskType);
       final resultData = _buildResultData(taskType);
 
-      final dto = report_api.CreateTaskReportDto(
+      final imageParams = _selectedImages
+          .map((f) => TaskReportImageParam(
+                file: f,
+                uploadedAt: DateTime.now(),
+              ))
+          .toList();
+
+      final params = SubmitParams(
         taskId: taskId,
         reportText: reportText,
         resultData: resultData,
+        images: imageParams,
+        experimentId: experimentId,
+        batchId: batchId,
+        markComplete: true,
+        hasNewContent: true,
       );
-      await ref.read(report_providers.submitReportProvider(dto).future);
 
-      // Complete task via API
-      await ref.read(completeTaskProvider(taskId).future);
+      final outcome = await ref
+          .read(taskReportSubmitServiceProvider)
+          .submitAndOptionallyComplete(params);
 
       ref.invalidate(taskDetailProvider(taskId));
-      ref.invalidate(report_providers.taskReportByTaskProvider(taskId));
+      ref.invalidate(taskReportByTaskProvider(taskId));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Đã hoàn thành và gửi báo cáo!'),
-            backgroundColor: AppColors.success,
+          SnackBar(
+            content: Text(outcome.toUserMessage()),
+            backgroundColor: outcome.mode == SubmitMode.error
+                ? AppColors.error
+                : AppColors.success,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -643,13 +808,19 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
     return parts.isEmpty ? 'Đã hoàn thành' : parts.join(' | ');
   }
 
-  report_model.ReportResultData _buildResultData(api.TaskType taskType) {
-    return report_model.ReportResultData(
-      plantsWatered: taskType == api.TaskType.watering
-          ? int.tryParse(_waterController.text)
-          : null,
-      waterAmount: taskType == api.TaskType.watering ? '${_waterController.text}ml' : null,
-      additionalNotes: _noteController.text,
-    );
+  Map<String, String> _buildResultData(api.TaskType taskType) {
+    final out = <String, String>{};
+    final schema = kQuickFormSchema[taskType];
+    if (schema != null) {
+      for (final f in schema.fields) {
+        final c = _fieldControllers[f.key];
+        final v = c?.text.trim();
+        if (v != null && v.isNotEmpty) out[f.key] = v;
+      }
+    }
+    final note = _noteController.text.trim();
+    if (note.isNotEmpty) out['additionalNotes'] = note;
+    out['condition'] = _selectedHealth;
+    return out;
   }
 }

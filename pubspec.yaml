@@ -29,6 +29,7 @@ dependencies:
 
   # HTTP
   dio: ^5.4.3
+  image_picker: ^1.0.7
 
   # UI
   cached_network_image: ^3.3.1

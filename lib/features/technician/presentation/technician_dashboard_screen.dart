@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/api/models/dashboard_model.dart';
+import '../../../core/api/models/task_model.dart' as taskApi;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/date_utils.dart';
 import '../../../shared/widgets/agritech_environment_background.dart';
+import '../../../shared/widgets/glass_widgets.dart';
+import '../../../shared/widgets/notification_bell.dart';
 import '../../../shared/widgets/plant_photo_gallery.dart';
-import '../../../shared/widgets/sensor_status_badge.dart';
 import '../../../shared/widgets/profile_button.dart';
-import '../../../shared/models/farm_model.dart';
-import '../../../mock/mock_farm.dart';
-import '../../../shared/models/growth_task_model.dart' as internal;
+import '../../../shared/widgets/snms_card.dart';
+import '../../dashboard/providers/role_dashboard_providers.dart';
+import '../../notifications/providers/notification_providers.dart';
 import '../providers/technician_task_providers.dart';
 
 class TechnicianDashboardScreen extends ConsumerWidget {
@@ -18,69 +22,76 @@ class TechnicianDashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
     final stats = ref.watch(technicianDashboardStatsProvider);
-    final allSensors = _getAllSensors();
-    final online = allSensors.where((s) => s.status == SensorStatusType.online).toList();
-    final tempSensor = online.isNotEmpty ? online.first : null;
-    final humiditySensors = online.where((s) => s.sensorType == SensorType.humidity).toList();
+    final kpiBundle = ref.watch(taskKpiBundleProvider);
+    final overview = ref.watch(dashboardOverviewProvider);
+    final unreadAsync = ref.watch(unreadNotificationsCountProvider);
+    final alertsAsync = ref.watch(dashboardAlertsProvider);
+    final unread = unreadAsync.maybeWhen(data: (n) => n, orElse: () => 0);
 
     return Scaffold(
       body: AgritechEnvironmentBackground(
         mode: AgritechBackgroundMode.dashboard,
         accentColor: AppColors.info,
         child: SafeArea(
-          child: CustomScrollView(
-            physics: const BouncingScrollPhysics(),
-            slivers: [
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(AppSpacing.lg),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildHeader(tt),
-                      const SizedBox(height: AppSpacing.xl),
-                      _buildEnvMetrics(tempSensor, humiditySensors, online.length),
-                      const SizedBox(height: AppSpacing.xl),
-                      _buildSectionHeader('Chỉ số hôm nay', Icons.insights_rounded, AppColors.primary),
-                      const SizedBox(height: AppSpacing.md),
-                      _buildKPIGrid(stats),
-                      const SizedBox(height: AppSpacing.xl),
-                      _buildSectionHeader('Thao tác nhanh', Icons.flash_on_rounded, AppColors.warning),
-                      const SizedBox(height: AppSpacing.md),
-                      _buildQuickActions(context),
-                      const SizedBox(height: AppSpacing.xl),
-                      _buildSectionHeader('Hình ảnh cây gần đây', Icons.eco_rounded, AppColors.success),
-                      const SizedBox(height: AppSpacing.md),
-                      const PlantPhotoGallery(maxPhotos: 5),
-                      const SizedBox(height: AppSpacing.xl),
-                      _buildSectionHeader('Công việc hôm nay', Icons.assignment_rounded, AppColors.primary),
-                      const SizedBox(height: AppSpacing.md),
-                      _buildPendingTasksList(context, ref),
-                      const SizedBox(height: AppSpacing.xl),
-                      _buildSectionHeader('Tổng quan cảm biến', Icons.sensors_rounded, AppColors.info),
-                      const SizedBox(height: AppSpacing.md),
-                      _buildSensorSummary(allSensors),
-                      const SizedBox(height: AppSpacing.huge),
-                    ],
+          child: RefreshIndicator(
+            onRefresh: () async {
+              ref.invalidate(taskKpiBundleProvider);
+              ref.invalidate(technicianDashboardStatsProvider);
+              ref.invalidate(dashboardOverviewProvider);
+              ref.invalidate(dashboardAlertsProvider);
+              ref.invalidate(unreadNotificationsCountProvider);
+            },
+            child: CustomScrollView(
+              physics: const BouncingScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHeader(tt, unread),
+                        const SizedBox(height: AppSpacing.xl),
+                        _buildKPIRow(stats, kpiBundle, overview),
+                        const SizedBox(height: AppSpacing.xl),
+                        _buildQuickActions(context),
+                        const SizedBox(height: AppSpacing.xl),
+                        _buildAlerts(context, alertsAsync, unread),
+                        const SizedBox(height: AppSpacing.xl),
+                        _buildSectionHeader('Hình ảnh cây gần đây',
+                            Icons.eco_rounded, AppColors.success),
+                        const SizedBox(height: AppSpacing.md),
+                        const PlantPhotoGallery(maxPhotos: 5),
+                        const SizedBox(height: AppSpacing.xl),
+                        _buildSectionHeader('Công việc hôm nay',
+                            Icons.assignment_rounded, AppColors.primary),
+                        const SizedBox(height: AppSpacing.md),
+                        _buildTodayTaskList(kpiBundle, tt, cs),
+                        const SizedBox(height: AppSpacing.huge),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildHeader(TextTheme tt) {
+  Widget _buildHeader(TextTheme tt, int unread) {
     return Row(
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Chào buổi sáng!', style: tt.headlineMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+              Text('Chào buổi sáng!',
+                  style: tt.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800, letterSpacing: -0.5)),
               const SizedBox(height: 4),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -91,58 +102,262 @@ class TechnicianDashboardScreen extends ConsumerWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.engineering_rounded, color: AppColors.primary, size: 14),
+                    Icon(Icons.engineering_rounded,
+                        color: AppColors.primary, size: 14),
                     const SizedBox(width: 4),
-                    Text('Kỹ thuật viên', style: TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w600)),
+                    Text('Kỹ thuật viên',
+                        style: TextStyle(
+                            color: AppColors.primary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
             ],
           ),
         ),
+        const NotificationBell(),
+        const SizedBox(width: AppSpacing.sm),
         const ProfileButton(),
       ],
     );
   }
 
-  Widget _buildEnvMetrics(SensorModel? tempSensor, List<SensorModel> humiditySensors, int onlineCount) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderLight),
-        boxShadow: [BoxShadow(color: Colors.black.withAlpha(5), blurRadius: 8, offset: const Offset(0, 2))],
+  Widget _buildKPIRow(
+    AsyncValue<TechDashboardStats> stats,
+    AsyncValue<TaskKpiBundle> bundle,
+    AsyncValue<DashboardOverviewModel> overview,
+  ) {
+    final todayCount = bundle.maybeWhen(
+        data: (b) => b.today.length,
+        orElse: () => 0);
+    final upcomingCount = bundle.maybeWhen(
+        data: (b) => b.upcoming.length,
+        orElse: () => 0);
+    final overdueCount = bundle.maybeWhen(
+        data: (b) => b.overdue.length,
+        orElse: () => 0);
+    final measurementCount = overview.maybeWhen(
+        data: (o) => o.totalMeasurementRecords,
+        orElse: () => 0);
+
+    return Row(
+      children: [
+        Expanded(
+            child: _KPICard(
+                value: '$todayCount',
+                label: 'Hôm nay',
+                color: AppColors.info,
+                icon: Icons.task_alt_rounded)),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+            child: _KPICard(
+                value: '$upcomingCount',
+                label: 'Sắp tới',
+                color: AppColors.warning,
+                icon: Icons.upcoming_rounded)),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+            child: _KPICard(
+                value: '$overdueCount',
+                label: 'Quá hạn',
+                color: AppColors.error,
+                icon: Icons.warning_amber_rounded)),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+            child: _KPICard(
+                value: '$measurementCount',
+                label: 'Số liệu đo',
+                color: AppColors.success,
+                icon: Icons.straighten_rounded)),
+      ],
+    );
+  }
+
+  Widget _buildQuickActions(BuildContext context) {
+    Widget action({
+      required IconData icon,
+      required String label,
+      required Color color,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+            decoration: BoxDecoration(
+              color: color.withAlpha(15),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withAlpha(40)),
+            ),
+            child: Column(
+              children: [
+                Icon(icon, color: color, size: 22),
+                const SizedBox(height: 4),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: color)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        action(
+            icon: Icons.assignment_rounded,
+            label: 'Task',
+            color: AppColors.primary,
+            onTap: () => context.go('/tech/tasks')),
+        const SizedBox(width: AppSpacing.sm),
+        action(
+            icon: Icons.sensors_rounded,
+            label: 'IoT',
+            color: AppColors.info,
+            onTap: () => context.push('/tech/iot')),
+        const SizedBox(width: AppSpacing.sm),
+        action(
+            icon: Icons.straighten_rounded,
+            label: 'Đo lường',
+            color: AppColors.success,
+            onTap: () => context.go('/tech/growth')),
+        const SizedBox(width: AppSpacing.sm),
+        action(
+            icon: Icons.scanner_rounded,
+            label: 'AI Scan',
+            color: AppColors.warning,
+            onTap: () => context.go('/tech/ai-scan')),
+      ],
+    );
+  }
+
+  Widget _buildAlerts(
+    BuildContext context,
+    AsyncValue<List<DashboardAlertModel>> alertsAsync,
+    int unread,
+  ) {
+    final hasAlerts = alertsAsync.maybeWhen(
+      data: (l) => l.isNotEmpty,
+      orElse: () => false,
+    );
+    if (!hasAlerts && unread == 0) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: AppColors.error, size: 18),
+            const SizedBox(width: AppSpacing.sm),
+            Text('Cảnh báo',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.error)),
+            const Spacer(),
+            TextButton(
+              onPressed: () => context.push('/notifications'),
+              child: Text('Xem tất cả',
+                  style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12)),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        alertsAsync.maybeWhen(
+          data: (list) => Column(
+            children: list
+                .take(3)
+                .map((a) => _AlertRow(alert: a, cs: cs))
+                .toList(),
+          ),
+          orElse: () => const SizedBox.shrink(),
+        ),
+        if (unread > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
+            child: GlassCard(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              borderRadius: 12,
+              onTap: () => context.push('/notifications'),
+              child: Row(
+                children: [
+                  Icon(Icons.notifications_active_rounded,
+                      color: AppColors.warning, size: 20),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'Bạn có $unread thông báo chưa đọc',
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 18, color: cs.onSurface.withAlpha(128)),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTodayTaskList(
+    AsyncValue<TaskKpiBundle> bundle,
+    TextTheme tt,
+    ColorScheme cs,
+  ) {
+    return bundle.when(
+      data: (b) {
+        final list = b.today.take(5).toList();
+        if (list.isEmpty) {
+          return SNMSCard(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle_outline_rounded,
+                      color: AppColors.success, size: 28),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Text(
+                      'Không có công việc hôm nay. Nghỉ ngơi thôi!',
+                      style: tt.bodyMedium
+                          ?.copyWith(color: cs.onSurface.withAlpha(153)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        return Column(
+          children: list
+              .map((t) => Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                    child: _TaskRow(task: t, tt: tt, cs: cs),
+                  ))
+              .toList(),
+        );
+      },
+      loading: () => const Padding(
+        padding: EdgeInsets.all(AppSpacing.lg),
+        child: Center(child: CircularProgressIndicator()),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _EnvMetricChip(
-              icon: Icons.thermostat_rounded,
-              value: '${tempSensor?.latestValue?.toStringAsFixed(1) ?? '—'}°C',
-              label: 'Nhiệt độ',
-              color: AppColors.warning,
-            ),
-          ),
-          Container(width: 1, height: 40, color: AppColors.borderLight),
-          Expanded(
-            child: _EnvMetricChip(
-              icon: Icons.water_drop_rounded,
-              value: '${humiditySensors.isNotEmpty && humiditySensors.first.latestValue != null ? humiditySensors.first.latestValue!.toStringAsFixed(0) : '—'}%',
-              label: 'Độ ẩm',
-              color: AppColors.info,
-            ),
-          ),
-          Container(width: 1, height: 40, color: AppColors.borderLight),
-          Expanded(
-            child: _EnvMetricChip(
-              icon: Icons.sensors_rounded,
-              value: '$onlineCount',
-              label: 'Online',
-              color: AppColors.success,
-            ),
-          ),
-        ],
+      error: (e, _) => SNMSCard(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Text('Lỗi tải công việc',
+              style: tt.bodyMedium?.copyWith(color: AppColors.error)),
+        ),
       ),
     );
   }
@@ -151,7 +366,8 @@ class TechnicianDashboardScreen extends ConsumerWidget {
     return Row(
       children: [
         Container(
-          width: 28, height: 28,
+          width: 28,
+          height: 28,
           decoration: BoxDecoration(
             color: color.withAlpha(18),
             borderRadius: BorderRadius.circular(8),
@@ -159,133 +375,21 @@ class TechnicianDashboardScreen extends ConsumerWidget {
           child: Icon(icon, size: 16, color: color),
         ),
         const SizedBox(width: 8),
-        Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color)),
+        Text(title,
+            style: TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w700, color: color)),
       ],
-    );
-  }
-
-  Widget _buildKPIGrid(AsyncValue<TechDashboardStats> stats) {
-    return stats.when(
-      data: (s) => Row(
-        children: [
-          Expanded(child: _KPICard(value: '${s.todayTasks}', label: 'Hôm nay', color: AppColors.info, icon: Icons.task_alt_rounded)),
-          const SizedBox(width: 12),
-          Expanded(child: _KPICard(value: '${s.overdueTasks}', label: 'Quá hạn', color: AppColors.error, icon: Icons.warning_amber_rounded)),
-          const SizedBox(width: 12),
-          Expanded(child: _KPICard(value: '${s.totalTasks}', label: 'Tuần này', color: AppColors.success, icon: Icons.check_circle_outline_rounded)),
-        ],
-      ),
-      loading: () => Row(
-        children: [
-          for (int i = 0; i < 3; i++) ...[
-            if (i > 0) const SizedBox(width: 12),
-            Expanded(child: Container(height: 80, decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(16)))),
-          ],
-        ],
-      ),
-      error: (_, __) => Row(
-        children: [
-          Expanded(child: _KPICard(value: '—', label: 'Hôm nay', color: AppColors.info, icon: Icons.task_alt_rounded)),
-          const SizedBox(width: 12),
-          Expanded(child: _KPICard(value: '—', label: 'Quá hạn', color: AppColors.error, icon: Icons.warning_amber_rounded)),
-          const SizedBox(width: 12),
-          Expanded(child: _KPICard(value: '—', label: 'Tuần này', color: AppColors.success, icon: Icons.check_circle_outline_rounded)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActions(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: _QuickActionCard(icon: Icons.sensors_rounded, label: 'IoT', subLabel: 'Cảm biến', color: AppColors.info, onTap: () => context.push('/tech/iot'))),
-        const SizedBox(width: 12),
-        Expanded(child: _QuickActionCard(icon: Icons.description_rounded, label: 'Báo cáo', subLabel: 'Gửi Researcher', color: AppColors.primary, onTap: () => context.push('/tech/report'))),
-        const SizedBox(width: 12),
-        Expanded(child: _QuickActionCard(icon: Icons.photo_library_rounded, label: 'Ảnh cây', subLabel: 'Thư viện', color: AppColors.success, onTap: () {})),
-      ],
-    );
-  }
-
-  Widget _buildPendingTasksList(BuildContext context, WidgetRef ref) {
-    final tasks = ref.watch(technicianTasksProvider);
-
-    return tasks.when(
-      data: (taskList) {
-        if (taskList.isEmpty) {
-          return _EmptyState(message: 'Không có công việc chờ xử lý', icon: Icons.check_circle_outline_rounded);
-        }
-        return Column(
-          children: taskList.take(5).map((task) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _TechTaskCard(task: task, onTap: () => context.go('/tech/tasks')),
-          )).toList(),
-        );
-      },
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => _EmptyState(message: 'Lỗi tải công việc', icon: Icons.error_outline),
-    );
-  }
-
-  Widget _buildSensorSummary(List<SensorModel> sensors) {
-    final online = sensors.where((s) => s.status == SensorStatusType.online).length;
-    final offline = sensors.where((s) => s.status == SensorStatusType.offline).length;
-    final warning = sensors.where((s) => s.status == SensorStatusType.warning).length;
-    return Row(
-      children: [
-        Expanded(child: _SensorStatusCard(label: 'Online', count: online, status: SensorStatus.online)),
-        const SizedBox(width: 12),
-        Expanded(child: _SensorStatusCard(label: 'Offline', count: offline, status: SensorStatus.offline)),
-        const SizedBox(width: 12),
-        Expanded(child: _SensorStatusCard(label: 'Warning', count: warning, status: SensorStatus.warning)),
-      ],
-    );
-  }
-
-  List<SensorModel> _getAllSensors() {
-    final sensors = <SensorModel>[];
-    for (final area in mockFarm.areas) {
-      for (final zone in area.zones) {
-        for (final bed in zone.beds) {
-          sensors.addAll(bed.sensors);
-        }
-      }
-    }
-    return sensors;
-  }
-}
-
-class _EnvMetricChip extends StatelessWidget {
-  const _EnvMetricChip({required this.icon, required this.value, required this.label, required this.color});
-  final IconData icon;
-  final String value;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 20, color: color),
-          const SizedBox(width: 6),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: color)),
-              Text(label, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurface.withAlpha(128))),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }
 
 class _KPICard extends StatelessWidget {
-  const _KPICard({required this.value, required this.label, required this.color, required this.icon});
+  const _KPICard({
+    required this.value,
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
   final String value;
   final String label;
   final Color color;
@@ -294,15 +398,18 @@ class _KPICard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgSurface = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
-    final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
-
+    final bgSurface =
+        isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+    final textSecondary =
+        isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: bgSurface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80)),
+        border: Border.all(
+            color: (isDark ? AppColors.borderDark : AppColors.borderLight)
+                .withAlpha(80)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withAlpha(isDark ? 22 : 10),
@@ -313,233 +420,185 @@ class _KPICard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  color: color.withAlpha(18),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: color.withAlpha(30)),
-                ),
-                child: Icon(icon, size: 18, color: color),
-              ),
-            ],
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withAlpha(18),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color.withAlpha(30)),
+            ),
+            child: Icon(icon, color: color, size: 20),
           ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(value, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: color, height: 1, letterSpacing: -0.5)),
-          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                  letterSpacing: -0.5)),
           const SizedBox(height: 2),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: textSecondary)),
-          ),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: textSecondary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center),
         ],
       ),
     );
   }
 }
 
-class _QuickActionCard extends StatelessWidget {
-  const _QuickActionCard({required this.icon, required this.label, required this.subLabel, required this.color, required this.onTap});
-  final IconData icon;
-  final String label;
-  final String subLabel;
-  final Color color;
-  final VoidCallback onTap;
+class _TaskRow extends StatelessWidget {
+  const _TaskRow({required this.task, required this.tt, required this.cs});
+  final taskApi.TaskModel task;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  Color get _statusColor => switch (task.status) {
+        taskApi.TaskStatus.pending => AppColors.warning,
+        taskApi.TaskStatus.inProgress => AppColors.primary,
+        taskApi.TaskStatus.completed => AppColors.success,
+        _ => AppColors.error,
+      };
+
+  IconData get _icon => switch (task.taskType) {
+        taskApi.TaskType.planting => Icons.eco_rounded,
+        taskApi.TaskType.watering => Icons.water_drop_rounded,
+        taskApi.TaskType.fertilizing => Icons.science_rounded,
+        taskApi.TaskType.observation => Icons.visibility_rounded,
+        taskApi.TaskType.inspection => Icons.search_rounded,
+        taskApi.TaskType.measurement => Icons.straighten_rounded,
+        taskApi.TaskType.harvest => Icons.agriculture_rounded,
+        taskApi.TaskType.other => Icons.more_horiz_rounded,
+      };
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgSurface = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
-    final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          decoration: BoxDecoration(
-            color: bgSurface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(isDark ? 22 : 10),
-                blurRadius: 12,
-                offset: const Offset(0, 3),
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => context.go('/tech/tasks/${task.id}'),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withAlpha(80),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: cs.outline.withAlpha(40)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: _statusColor.withAlpha(25),
+                borderRadius: BorderRadius.circular(10),
               ),
-            ],
-          ),
-          child: Column(
-            children: [
-              Container(
-                width: 40, height: 40,
-                decoration: BoxDecoration(
-                  color: color.withAlpha(18),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: color.withAlpha(30)),
+              child: Icon(_icon, color: _statusColor, size: 20),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(task.title,
+                      style: tt.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(
+                      '${task.experimentCode ?? ''} · ${task.batchCode ?? ''}',
+                      style: tt.labelSmall?.copyWith(
+                          color: cs.onSurface.withAlpha(128), fontSize: 10),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: _statusColor.withAlpha(25),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Text(formatTime(task.dueDate),
+                      style: tt.labelSmall?.copyWith(
+                          color: _statusColor, fontWeight: FontWeight.w700)),
                 ),
-                child: Icon(icon, size: 20, color: color),
-              ),
-              const SizedBox(height: 8),
-              Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
-              Text(subLabel, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: textSecondary)),
-            ],
-          ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _TechTaskCard extends StatelessWidget {
-  const _TechTaskCard({required this.task, required this.onTap});
-  final internal.TaskModel task;
-  final VoidCallback onTap;
+class _AlertRow extends StatelessWidget {
+  const _AlertRow({required this.alert, required this.cs});
+  final DashboardAlertModel alert;
+  final ColorScheme cs;
 
   Color get _color {
-    final type = task.taskType.toString().toLowerCase();
-    if (type.contains('water')) return AppColors.info;
-    if (type.contains('fertiliz')) return AppColors.primary;
-    if (type.contains('inspect')) return AppColors.warning;
-    return AppColors.accent;
-  }
-
-  IconData get _icon {
-    final type = task.taskType.toString().toLowerCase();
-    if (type.contains('water')) return Icons.water_drop_rounded;
-    if (type.contains('fertiliz')) return Icons.grass_rounded;
-    if (type.contains('inspect')) return Icons.search_rounded;
-    return Icons.agriculture_rounded;
+    final sev = alert.severity.toLowerCase();
+    return switch (sev) {
+      'critical' => AppColors.error,
+      'high' => AppColors.warning,
+      'medium' => AppColors.info,
+      _ => cs.onSurface.withAlpha(128),
+    };
   }
 
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final cs = Theme.of(context).colorScheme;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceLight,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.borderLight),
-            boxShadow: [BoxShadow(color: Colors.black.withAlpha(5), blurRadius: 6, offset: const Offset(0, 2))],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44, height: 44,
-                decoration: BoxDecoration(
-                  color: _color.withAlpha(18),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _color.withAlpha(40)),
-                ),
-                child: Icon(_icon, size: 22, color: _color),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: GlassCard(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        borderRadius: 12,
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 40,
+              decoration: BoxDecoration(
+                color: _color,
+                borderRadius: BorderRadius.circular(4),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(task.taskName, style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Icon(Icons.schedule_rounded, size: 12, color: cs.onSurface.withAlpha(102)),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${task.dueDate.day}/${task.dueDate.month}',
-                          style: tt.labelSmall?.copyWith(color: cs.onSurface.withAlpha(128)),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(alert.title,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(alert.message,
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: cs.onSurface.withAlpha(153)),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: _color.withAlpha(20), borderRadius: BorderRadius.circular(8)),
-                child: Text('Chờ', style: tt.labelSmall?.copyWith(color: _color, fontWeight: FontWeight.w700)),
-              ),
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right_rounded, size: 20, color: cs.onSurface.withAlpha(77)),
-            ],
-          ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(formatTime(alert.createdAt),
+                style: TextStyle(
+                    fontSize: 10, color: cs.onSurface.withAlpha(102))),
+          ],
         ),
-      ),
-    );
-  }
-}
-
-class _SensorStatusCard extends StatelessWidget {
-  const _SensorStatusCard({required this.label, required this.count, required this.status});
-  final String label;
-  final int count;
-  final SensorStatus status;
-
-  Color get _color => switch (status) {
-    SensorStatus.online => AppColors.success,
-    SensorStatus.offline => AppColors.error,
-    SensorStatus.warning => AppColors.warning,
-    SensorStatus.idle => AppColors.neutral,
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.borderLight),
-        boxShadow: [BoxShadow(color: Colors.black.withAlpha(5), blurRadius: 6, offset: const Offset(0, 2))],
-      ),
-      child: Column(
-        children: [
-          SensorStatusBadge(status: status),
-          const SizedBox(height: 8),
-          Text('$count', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _color)),
-          Text(label, style: tt.labelSmall?.copyWith(color: Theme.of(context).colorScheme.onSurface.withAlpha(128))),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.message, required this.icon});
-  final String message;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.borderLight),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 24, color: AppColors.success.withAlpha(153)),
-          const SizedBox(width: 10),
-          Text(message, style: Theme.of(context).textTheme.bodyMedium),
-        ],
       ),
     );
   }

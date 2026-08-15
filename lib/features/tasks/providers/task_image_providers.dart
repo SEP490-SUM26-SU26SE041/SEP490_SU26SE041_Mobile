@@ -5,30 +5,22 @@ import '../../../core/api/models/task_report_model.dart';
 import '../../../core/api/services/task_image_api_service.dart';
 import '../data/task_image_repository.dart';
 
+export '../../../core/api/services/task_image_api_service.dart';
+
 final taskImageRepositoryProvider = Provider<TaskImageRepository>((ref) {
   return TaskImageRepository(ref.read(taskImageApiServiceProvider));
 });
 
-// ─── Get images by report ───────────────────────────────────────────────
+// ─── Get images by report ───────────────────────────────────────────────────
 
-final taskImagesByReportProvider = FutureProvider.autoDispose.family<List<TaskImageModel>, String>(
-  (ref, reportId) async {
-    return ref.read(taskImageRepositoryProvider).getImagesByReport(reportId);
-  },
-);
+final taskImagesByReportProvider = FutureProvider.autoDispose
+    .family<List<TaskImageModel>, String>((ref, reportId) async {
+  return ref.read(taskImageRepositoryProvider).getImagesByReport(reportId);
+});
 
-// ─── Get images by batch ────────────────────────────────────────────────
+// ─── Get images by batch ─────────────────────────────────────────────────
 
-final taskImagesByBatchProvider = FutureProvider.autoDispose.family<List<TaskImageModel>, String>(
-  (ref, batchId) async {
-    return ref.read(taskImageRepositoryProvider).getImagesByBatch(batchId);
-  },
-);
-
-// ─── Upload image ──────────────────────────────────────────────────────
-
-final uploadTaskImageProvider = FutureProvider.autoDispose.family<TaskImageModel, UploadTaskImageDto>(
-  (ref, dto) async {
-    return ref.read(taskImageRepositoryProvider).uploadImage(dto);
-  },
-);
+final taskImagesByBatchProvider = FutureProvider.autoDispose
+    .family<List<TaskImageModel>, String>((ref, batchId) async {
+  return ref.read(taskImageRepositoryProvider).getImagesByBatch(batchId);
+});

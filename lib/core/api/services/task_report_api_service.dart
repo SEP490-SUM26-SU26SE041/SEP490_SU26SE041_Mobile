@@ -24,43 +24,16 @@ class TaskReportApiService {
   }
 
   /// GET /task-reports/task/{taskId}
-  Future<TaskReportModel?> getReportByTask(String taskId) async {
+  /// Trả về ARRAY các báo cáo (một task có thể có nhiều reports theo thời gian).
+  Future<List<TaskReportModel>> getReportsByTask(String taskId) async {
     final res = await _dio.get(ApiEndpoints.taskReportByTask(taskId));
     final data = res.data;
-    
-    // Handle null or empty response
-    if (data == null) return null;
-    
-    // Handle direct array response (empty or with items) - line 112 shows "[]"
     if (data is List) {
-      if ((data as List).isEmpty) return null;
-      // If array has items, return first one
-      final first = (data as List).first;
-      if (first is Map<String, dynamic>) {
-        return TaskReportModel.fromJson(first);
-      }
-      return null;
+      return data
+          .map((e) => TaskReportModel.fromJson(e as Map<String, dynamic>))
+          .toList();
     }
-    
-    // Handle wrapped response {success, message, data}
-    if (data is Map<String, dynamic>) {
-      // If data field is empty array or null
-      if (data['data'] == null) return null;
-      final inner = data['data'];
-      if (inner is List) {
-        if ((inner as List).isEmpty) return null;
-        final first = inner.first;
-        if (first is Map<String, dynamic>) {
-          return TaskReportModel.fromJson(first);
-        }
-      }
-      if (inner is Map<String, dynamic>) {
-        return TaskReportModel.fromJson(inner);
-      }
-      return null;
-    }
-    
-    return null;
+    return [];
   }
 
   /// GET /task-reports/batch/{batchId}
@@ -90,37 +63,4 @@ class TaskReportApiService {
     }
     return [];
   }
-}
-
-class CreateTaskReportDto {
-  const CreateTaskReportDto({
-    required this.taskId,
-    required this.reportText,
-    this.resultData,
-  });
-
-  final String taskId;
-  final String reportText;
-  final ReportResultData? resultData;
-
-  Map<String, dynamic> toJson() => {
-    'taskId': taskId,
-    'reportText': reportText,
-    if (resultData != null) 'resultData': resultData!.toJson(),
-  };
-}
-
-class UpdateTaskReportDto {
-  const UpdateTaskReportDto({
-    required this.reportText,
-    this.resultData,
-  });
-
-  final String reportText;
-  final ReportResultData? resultData;
-
-  Map<String, dynamic> toJson() => {
-    'reportText': reportText,
-    if (resultData != null) 'resultData': resultData!.toJson(),
-  };
 }

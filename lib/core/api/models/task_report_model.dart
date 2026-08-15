@@ -2,7 +2,12 @@ import '../../utils/date_utils.dart';
 
 /// TaskReport model matching SmartFarm backend API response.
 ///
-/// Maps to: POST/GET /task-reports
+/// Maps to: POST/GET /task-reports.
+///
+/// `resultData` là JSON dynamic dạng `{"key": value}` (string/number/bool…).
+/// Luôn lưu dạng `String → String` cho an toàn vì FE Mobile đang hỗ trợ
+/// `def_<uuid>` keys (Measurement) + flat keys (legacy field map) +
+/// `custom_N` keys (user-defined). BE nhận JSON bất kỳ.
 class TaskReportModel {
   const TaskReportModel({
     required this.id,
@@ -11,8 +16,8 @@ class TaskReportModel {
     required this.reporterId,
     this.reporterName,
     required this.reportText,
-    this.resultData,
     required this.reportedAt,
+    this.resultData,
     this.images,
   });
 
@@ -22,7 +27,10 @@ class TaskReportModel {
   final String reporterId;
   final String? reporterName;
   final String reportText;
-  final ReportResultData? resultData;
+
+  /// JSON object dạng `{ key: value }`. value có thể là String, num, bool…
+  /// Luôn parsed non-null (mặc định rỗng).
+  final Map<String, dynamic>? resultData;
   final DateTime reportedAt;
   final List<TaskImageModel>? images;
 
@@ -34,9 +42,7 @@ class TaskReportModel {
       reporterId: json['reporterId'] as String,
       reporterName: json['reporterName'] as String?,
       reportText: json['reportText'] as String? ?? '',
-      resultData: json['resultData'] != null
-          ? ReportResultData.fromJson(json['resultData'] as Map<String, dynamic>)
-          : null,
+      resultData: _parseResultData(json['resultData']),
       reportedAt: parseApiDateTimeOrNow(json['reportedAt']?.toString()),
       images: (json['images'] as List?)
           ?.map((e) => TaskImageModel.fromJson(e as Map<String, dynamic>))
@@ -45,51 +51,63 @@ class TaskReportModel {
   }
 
   Map<String, dynamic> toJson() => {
-    'taskId': taskId,
-    'reportText': reportText,
-    if (resultData != null) 'resultData': resultData!.toJson(),
-  };
+        'taskId': taskId,
+        'reportText': reportText,
+        if (resultData != null && resultData!.isNotEmpty)
+          'resultData': resultData,
+      };
+
+  static Map<String, dynamic>? _parseResultData(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return null;
+  }
 }
 
-class ReportResultData {
-  const ReportResultData({this.plantsWatered, this.waterAmount,
-    this.condition, this.plantsWilting, this.action, this.plantsHarvested,
-    this.harvestWeight, this.additionalNotes});
+/// DTO tạo TaskReport. `resultData` là map các cặp key-value tự do.
+class CreateTaskReportDto {
+  const CreateTaskReportDto({
+    required this.taskId,
+    required this.reportText,
+    this.resultData,
+  });
 
-  final int? plantsWatered;
-  final String? waterAmount;
-  final String? condition;
-  final int? plantsWilting;
-  final String? action;
-  final int? plantsHarvested;
-  final String? harvestWeight;
-  final String? additionalNotes;
+  final String taskId;
+  final String reportText;
 
-  factory ReportResultData.fromJson(Map<String, dynamic> json) {
-    return ReportResultData(
-      plantsWatered: json['plantsWatered'] as int?,
-      waterAmount: json['waterAmount'] as String?,
-      condition: json['condition'] as String?,
-      plantsWilting: json['plantsWilting'] as int?,
-      action: json['action'] as String?,
-      plantsHarvested: json['plantsHarvested'] as int?,
-      harvestWeight: json['harvestWeight'] as String?,
-      additionalNotes: json['additionalNotes'] as String?,
-    );
-  }
+  /// Mỗi value phải là string tương thích với FE service:
+  ///   - number fields → dạng "18.5"
+  ///   - select fields → dạng "Tốt"
+  ///   - free text fields → string tự do
+  final Map<String, String>? resultData;
 
   Map<String, dynamic> toJson() => {
-    if (plantsWatered != null) 'plantsWatered': plantsWatered,
-    if (waterAmount != null) 'waterAmount': waterAmount,
-    if (condition != null) 'condition': condition,
-    if (plantsWilting != null) 'plantsWilting': plantsWilting,
-    if (action != null) 'action': action,
-    if (plantsHarvested != null) 'plantsHarvested': plantsHarvested,
-    if (harvestWeight != null) 'harvestWeight': harvestWeight,
-    if (additionalNotes != null) 'additionalNotes': additionalNotes,
-  };
+        'taskId': taskId,
+        'reportText': reportText,
+        if (resultData != null && resultData!.isNotEmpty)
+          'resultData': resultData,
+      };
 }
 
+/// DTO cập nhật report.
+class UpdateTaskReportDto {
+  const UpdateTaskReportDto({
+    required this.reportText,
+    this.resultData,
+  });
+
+  final String reportText;
+  final Map<String, String>? resultData;
+
+  Map<String, dynamic> toJson() => {
+        'reportText': reportText,
+        if (resultData != null && resultData!.isNotEmpty)
+          'resultData': resultData,
+      };
+}
+
+/// Model ảnh minh chứng cho task report.
 class TaskImageModel {
   const TaskImageModel({
     required this.id,

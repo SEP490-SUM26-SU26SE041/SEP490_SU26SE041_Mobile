@@ -98,11 +98,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         if (!mounted) return;
         final role = authState.user.role;
         final dashboard = switch (role) {
-          UserRole.researcher  => '/dashboard',
-          UserRole.student    => '/student/dashboard',
+          UserRole.researcher => '/dashboard',
+          UserRole.student => '/student/dashboard',
           UserRole.technician => '/tech/dashboard',
-          UserRole.farmManager => '/fm/dashboard',
-          UserRole.admin      => '/admin/dashboard',
         };
         context.go(dashboard);
       });
@@ -112,6 +110,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (authState is AuthUnauthenticated || authState is AuthInitial) {
       _redirectHandled = false;
     }
+
+    // Toast error when login fails (in addition to inline error banner).
+    ref.listen<AuthState>(authProvider, (prev, next) {
+      if (next is AuthError && prev is! AuthError) {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.clearSnackBars();
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Sai tài khoản hoặc mật khẩu. Vui lòng thử lại.',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.all(16),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    });
 
     return Scaffold(
       body: AgritechEnvironmentBackground(

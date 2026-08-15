@@ -2169,14 +2169,13 @@ class _ExpTaskStatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = todayInVN();
     final weekLater = today.add(const Duration(days: 7));
 
     int overdueCount = 0, todayCount = 0, upcomingCount = 0, completedCount = 0;
 
     for (final task in tasks) {
-      final dueDate = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+      final dueDate = dateOnlyInVN(task.dueDate);
       if (task.status == internal.TaskStatus.completed) {
         completedCount++;
       } else if (dueDate.isBefore(today)) {
@@ -2309,8 +2308,7 @@ class _ExpSmartTaskList extends StatelessWidget {
   final int? overdueDays;
 
   List<internal.TaskModel> get _filtered {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = todayInVN();
     final weekLater = today.add(const Duration(days: 7));
 
     switch (filter) {
@@ -2318,17 +2316,17 @@ class _ExpSmartTaskList extends StatelessWidget {
       case TaskFilter.today:
         final tomorrow = today.add(const Duration(days: 1));
         return tasks.where((t) {
-          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          final due = dateOnlyInVN(t.dueDate);
           return due == today || due == tomorrow;
         }).toList();
       case TaskFilter.upcoming:
         return tasks.where((t) {
-          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          final due = dateOnlyInVN(t.dueDate);
           return due.isAfter(today) && due.isBefore(weekLater);
         }).toList();
       case TaskFilter.overdue:
         return tasks.where((t) {
-          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          final due = dateOnlyInVN(t.dueDate);
           if (due.isBefore(today) && t.status != internal.TaskStatus.completed) {
             if (overdueDays != null) {
               final daysDiff = today.difference(due).inDays;
@@ -2345,12 +2343,11 @@ class _ExpSmartTaskList extends StatelessWidget {
 
   Map<String, List<internal.TaskModel>> get _grouped {
     final Map<String, List<internal.TaskModel>> grouped = {};
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = todayInVN();
     final tomorrow = today.add(const Duration(days: 1));
 
     for (final task in _filtered) {
-      final dueDate = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+      final dueDate = dateOnlyInVN(task.dueDate);
       String key;
 
       if (task.status == internal.TaskStatus.completed) {
@@ -2587,13 +2584,12 @@ class _ExpPremiumTaskCard extends StatelessWidget {
   }
 
   String _formatDueDate(DateTime dt) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final due = DateTime(dt.year, dt.month, dt.day);
+    final today = todayInVN();
+    final due = dateOnlyInVN(dt);
     if (due == today) return 'Hôm nay';
     if (due == today.add(const Duration(days: 1))) return 'Ngày mai';
     if (due.isBefore(today)) return 'Quá hạn';
-    return '${dt.day}/${dt.month}';
+    return formatDateShort(dt);
   }
 }
 
@@ -2713,7 +2709,7 @@ class _ExpTaskDetailSheet extends StatelessWidget {
     );
   }
 
-  String _formatDate(DateTime dt) => '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+  String _formatDate(DateTime dt) => formatDueDate(dt);
 }
 
 class _ExpDetailItem extends StatelessWidget {
@@ -2804,8 +2800,8 @@ class _ExpTaskReportSheet extends ConsumerWidget {
           const Divider(height: 1),
           Flexible(
             child: reportAsync.when(
-              data: (report) {
-                if (report == null) {
+              data: (reports) {
+                if (reports.isEmpty) {
                   return Center(child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -2817,6 +2813,9 @@ class _ExpTaskReportSheet extends ConsumerWidget {
                     ],
                   ));
                 }
+                // Hiển thị báo cáo mới nhất
+                final sorted = [...reports]..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+                final report = sorted.first;
                 return SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
                   child: Column(
@@ -2897,7 +2896,7 @@ class _ExpTaskReportSheet extends ConsumerWidget {
     );
   }
 
-  String _formatDateTime(DateTime dt) => '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  String _formatDateTime(DateTime dt) => formatDateTime(dt);
 }
 
 class _ExpReportItem extends StatelessWidget {

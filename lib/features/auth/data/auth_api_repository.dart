@@ -29,9 +29,7 @@ class AuthRepository {
 
   UserRole _parseRole(String role) {
     return switch (role.toLowerCase()) {
-      'admin' => UserRole.admin,
       'researcher' => UserRole.researcher,
-      'farmmanager' || 'farm_manager' => UserRole.farmManager,
       'technician' => UserRole.technician,
       'student' => UserRole.student,
       _ => UserRole.student,

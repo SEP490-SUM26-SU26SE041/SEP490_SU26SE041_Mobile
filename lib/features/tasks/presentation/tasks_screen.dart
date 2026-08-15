@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/date_utils.dart';
 import '../../../shared/models/growth_task_model.dart' as task_model;
 import '../../tasks/providers/task_providers.dart';
 
@@ -82,6 +83,13 @@ class _TasksScreenState extends ConsumerState<TasksScreen>
             loading: () => const _TaskStatsBarSkeleton(),
             error: (_, __) => const SizedBox.shrink(),
           ),
+          // Daily Progress Bar - chỉ hiển thị khi filter là "Hôm nay"
+          if (_activeFilter == TaskFilter.today)
+            tasksAsync.when(
+              data: (tasks) => _DailyProgressCard(tasks: tasks),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
           // Search bar
           _SearchBar(
             onChanged: (q) => setState(() => _searchQuery = q),
@@ -299,8 +307,7 @@ class _TaskStatsBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = todayInVN();
     final tomorrow = today.add(const Duration(days: 1));
     final weekLater = today.add(const Duration(days: 7));
 
@@ -310,7 +317,7 @@ class _TaskStatsBar extends StatelessWidget {
     int completedCount = 0;
 
     for (final task in tasks) {
-      final dueDate = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+      final dueDate = dateOnlyInVN(task.dueDate);
       if (task.status == task_model.TaskStatus.completed) {
         completedCount++;
       } else if (dueDate.isBefore(today)) {
@@ -384,6 +391,141 @@ class _TaskStatsBarSkeleton extends StatelessWidget {
         ]).expand((e) => e).toList(),
       ),
     );
+  }
+}
+
+// ─── Daily Progress Card ────────────────────────────────────────────────
+// Hiển thị thanh tiến độ hoàn thành các task trong ngày hôm nay
+
+class _DailyProgressCard extends StatelessWidget {
+  const _DailyProgressCard({required this.tasks});
+  final List<task_model.TaskModel> tasks;
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final today = todayInVN();
+    final tomorrow = today.add(const Duration(days: 1));
+
+    // Đếm task hôm nay (dueDate hôm nay HOẶC ngày mai) — bao gồm cả completed
+    final todayTasks = tasks.where((t) {
+      final due = dateOnlyInVN(t.dueDate);
+      return due == today || due == tomorrow;
+    }).toList();
+
+    final total = todayTasks.length;
+    final completed = todayTasks
+        .where((t) => t.status == task_model.TaskStatus.completed)
+        .length;
+    final percent = total == 0 ? 0.0 : completed / total;
+
+    final Color bgCard = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
+    final Color textPrimary = isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final Color textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bgCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(isDark ? 20 : 6),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withAlpha(15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.today_rounded, size: 18, color: AppColors.primary),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Tiến độ hôm nay', style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: textPrimary)),
+                    const SizedBox(height: 2),
+                    Text(
+                      total == 0
+                          ? 'Không có công việc trong ngày'
+                          : '$completed / $total công việc hoàn thành',
+                      style: tt.bodySmall?.copyWith(color: textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _progressColor(percent).withAlpha(15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _progressColor(percent).withAlpha(40)),
+                ),
+                child: Text(
+                  '${(percent * 100).toInt()}%',
+                  style: tt.titleSmall?.copyWith(color: _progressColor(percent), fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Progress bar với track + glow
+          Stack(
+            children: [
+              Container(
+                height: 8,
+                decoration: BoxDecoration(
+                  color: (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(120),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              FractionallySizedBox(
+                widthFactor: percent.clamp(0.0, 1.0),
+                child: Container(
+                  height: 8,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [_progressColor(percent).withAlpha(180), _progressColor(percent)],
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _progressColor(percent).withAlpha(80),
+                        blurRadius: 6,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _progressColor(double percent) {
+    if (percent >= 1.0) return AppColors.success;
+    if (percent >= 0.5) return AppColors.primary;
+    if (percent > 0) return AppColors.warning;
+    return AppColors.neutral;
   }
 }
 
@@ -493,8 +635,7 @@ class _SmartTaskList extends StatelessWidget {
   final int? overdueDays;
 
   List<task_model.TaskModel> get _filtered {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = todayInVN();
     final tomorrow = today.add(const Duration(days: 1));
     final weekLater = today.add(const Duration(days: 7));
 
@@ -506,19 +647,19 @@ class _SmartTaskList extends StatelessWidget {
         break;
       case TaskFilter.today:
         result = tasks.where((t) {
-          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          final due = dateOnlyInVN(t.dueDate);
           return due == today || due == tomorrow;
         }).toList();
         break;
       case TaskFilter.upcoming:
         result = tasks.where((t) {
-          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          final due = dateOnlyInVN(t.dueDate);
           return due.isAfter(today) && due.isBefore(weekLater);
         }).toList();
         break;
       case TaskFilter.overdue:
         result = tasks.where((t) {
-          final due = DateTime(t.dueDate.year, t.dueDate.month, t.dueDate.day);
+          final due = dateOnlyInVN(t.dueDate);
           if (due.isBefore(today) && t.status != task_model.TaskStatus.completed) {
             if (overdueDays != null) {
               final daysDiff = today.difference(due).inDays;
@@ -549,12 +690,11 @@ class _SmartTaskList extends StatelessWidget {
 
   Map<String, List<task_model.TaskModel>> get _grouped {
     final Map<String, List<task_model.TaskModel>> grouped = {};
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = todayInVN();
     final tomorrow = today.add(const Duration(days: 1));
 
     for (final task in _filtered) {
-      final dueDate = DateTime(task.dueDate.year, task.dueDate.month, task.dueDate.day);
+      final dueDate = dateOnlyInVN(task.dueDate);
       String key;
 
       if (task.status == task_model.TaskStatus.completed) {
@@ -771,20 +911,32 @@ class PremiumTaskCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgCard = isDark ? AppColors.surfaceDark : AppColors.surfaceLight;
     final textPrimary = isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight;
+    final textSecondary = isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight;
 
-    // Tính số ngày quá hạn
-    String? overdueText;
+    // Tính số ngày quá hạn — CHỈ hiển thị khi task thực sự quá hạn
+    int? overdueDays;
     if (_isOverdue && task.status != task_model.TaskStatus.completed) {
-      final days = DateTime.now().difference(task.dueDate).inDays;
-      overdueText = 'Quá hạn $days ngày';
+      overdueDays = DateTime.now().difference(task.dueDate).inDays;
     }
 
     return Container(
       decoration: BoxDecoration(
         color: bgCard,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _isOverdue ? AppColors.error.withAlpha(50) : (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80)),
-        boxShadow: [BoxShadow(color: Colors.black.withAlpha(isDark ? 20 : 8), blurRadius: 12, offset: const Offset(0, 4))],
+        border: Border.all(
+          color: _isOverdue
+              ? AppColors.error.withAlpha(60)
+              : (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _isOverdue
+                ? AppColors.error.withAlpha(isDark ? 18 : 6)
+                : Colors.black.withAlpha(isDark ? 20 : 8),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Material(
         color: Colors.transparent,
@@ -793,59 +945,200 @@ class PremiumTaskCard extends StatelessWidget {
           onTap: () => _showDetail(context),
           borderRadius: BorderRadius.circular(16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ── HEADER: icon + title + status ──
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(width: 44, height: 44, decoration: BoxDecoration(color: _statusColor.withAlpha(20), borderRadius: BorderRadius.circular(12)), child: Icon(_typeIcon, size: 22, color: _statusColor)),
+                        Container(
+                          width: 46, height: 46,
+                          decoration: BoxDecoration(
+                            color: _statusColor.withAlpha(20),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: _statusColor.withAlpha(40)),
+                          ),
+                          child: Icon(_typeIcon, size: 22, color: _statusColor),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(task.taskName, style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: textPrimary), maxLines: 2, overflow: TextOverflow.ellipsis),
+                              Text(
+                                task.taskName,
+                                style: tt.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700, color: textPrimary),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                               if (task.experimentTitle != null) ...[
                                 const SizedBox(height: 2),
-                                Text(task.experimentTitle!, style: tt.bodySmall?.copyWith(color: AppColors.primary.withAlpha(200), fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                Row(
+                                  children: [
+                                    Icon(Icons.science_outlined,
+                                        size: 12, color: AppColors.primary.withAlpha(180)),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        task.experimentTitle!,
+                                        style: tt.bodySmall?.copyWith(
+                                            color: AppColors.primary.withAlpha(200),
+                                            fontWeight: FontWeight.w500),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ],
                             ],
                           ),
                         ),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(color: _statusColor.withAlpha(20), borderRadius: BorderRadius.circular(8)),
-                          child: Text(_statusLabel, style: tt.labelSmall?.copyWith(color: _statusColor, fontWeight: FontWeight.w600)),
+                          decoration: BoxDecoration(
+                            color: _statusColor.withAlpha(20),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: _statusColor.withAlpha(40)),
+                          ),
+                          child: Text(
+                            _statusLabel,
+                            style: tt.labelSmall?.copyWith(
+                                color: _statusColor, fontWeight: FontWeight.w700),
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8, runSpacing: 6,
-                      children: [
-                        _MetaTag(icon: Icons.person_outline_rounded, label: task.assignedTo ?? 'Chưa giao', color: AppColors.primary),
-                        _MetaTag(
-                          icon: _isOverdue ? Icons.warning_amber_rounded : Icons.schedule_rounded,
-                          label: overdueText ?? _formatDueDate(task.dueDate),
-                          color: _isOverdue ? AppColors.error : AppColors.textSecondaryLight,
+                    // ── MÔ TẢ (preview) ──
+                    if (task.description != null && task.description!.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        task.description!,
+                        style: tt.bodySmall?.copyWith(color: textSecondary, height: 1.4),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    // ── THỜI HẠN (full date/time) ──
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _isOverdue
+                            ? AppColors.error.withAlpha(10)
+                            : (isDark ? AppColors.backgroundDark : AppColors.backgroundLight).withAlpha(180),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _isOverdue
+                              ? AppColors.error.withAlpha(50)
+                              : (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80),
                         ),
-                        if (task.batchCode != null) _MetaTag(icon: Icons.inventory_2_outlined, label: task.batchCode!, color: AppColors.success),
-                        if (task.experimentStageName != null) _MetaTag(icon: Icons.layers_outlined, label: task.experimentStageName!, color: AppColors.info),
-                      ],
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _isOverdue ? Icons.warning_amber_rounded : Icons.event_rounded,
+                            size: 16,
+                            color: _isOverdue ? AppColors.error : AppColors.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _isOverdue ? 'Đã quá hạn' : 'Thời hạn',
+                                  style: tt.labelSmall?.copyWith(
+                                    color: _isOverdue ? AppColors.error : textSecondary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  formatDueDate(task.dueDate),
+                                  style: tt.titleSmall?.copyWith(
+                                    color: _isOverdue ? AppColors.error : textPrimary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Badge "Quá hạn X ngày" — CHỈ hiển thị khi overdue
+                          if (overdueDays != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppColors.error,
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppColors.error.withAlpha(60),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Text(
+                                'Quá hạn $overdueDays ngày',
+                                style: tt.labelSmall?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
+                    // ── META TAGS ──
+                    if (task.assignedTo != null ||
+                        task.batchCode != null ||
+                        task.experimentStageName != null) ...[
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          if (task.assignedTo != null)
+                            _MetaTag(
+                              icon: Icons.person_outline_rounded,
+                              label: task.assignedTo!,
+                              color: AppColors.primary,
+                            ),
+                          if (task.batchCode != null)
+                            _MetaTag(
+                              icon: Icons.inventory_2_outlined,
+                              label: task.batchCode!,
+                              color: AppColors.success,
+                            ),
+                          if (task.experimentStageName != null)
+                            _MetaTag(
+                              icon: Icons.layers_outlined,
+                              label: task.experimentStageName!,
+                              color: AppColors.info,
+                            ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
-              // Report button for completed tasks
+              // ── Report button for completed tasks ──
               if (task.status == task_model.TaskStatus.completed && onReportTap != null)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   decoration: BoxDecoration(
                     color: AppColors.success.withAlpha(10),
-                    borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
+                    borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
                     border: Border(top: BorderSide(color: AppColors.success.withAlpha(30))),
                   ),
                   child: Material(
@@ -860,7 +1153,9 @@ class PremiumTaskCard extends StatelessWidget {
                           children: [
                             Icon(Icons.assessment_rounded, size: 18, color: AppColors.success),
                             const SizedBox(width: 8),
-                            Text('Xem báo cáo', style: tt.labelMedium?.copyWith(color: AppColors.success, fontWeight: FontWeight.w600)),
+                            Text('Xem báo cáo',
+                                style: tt.labelMedium?.copyWith(
+                                    color: AppColors.success, fontWeight: FontWeight.w600)),
                             const SizedBox(width: 4),
                             Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppColors.success),
                           ],
@@ -885,15 +1180,8 @@ class PremiumTaskCard extends StatelessWidget {
     );
   }
 
-  String _formatDueDate(DateTime dt) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final due = DateTime(dt.year, dt.month, dt.day);
-    if (due == today) return 'Hôm nay';
-    if (due == today.add(const Duration(days: 1))) return 'Ngày mai';
-    if (due.isBefore(today)) return 'Quá hạn';
-    return '${dt.day}/${dt.month}';
-  }
+  /// Format đầy đủ ngày tháng năm giờ phút theo UTC+7: dd/MM/yyyy HH:mm
+  String _formatDueDateTime(DateTime dt) => formatDueDate(dt);
 }
 
 class _MetaTag extends StatelessWidget {
@@ -999,7 +1287,7 @@ class TaskDetailSheet extends StatelessWidget {
                   Row(children: [
                     Expanded(child: _MiniDetailItem(icon: Icons.person_outline_rounded, label: 'Người được giao', value: task.assignedTo ?? 'Chưa giao', isDark: isDark)),
                     const SizedBox(width: 12),
-                    Expanded(child: _MiniDetailItem(icon: _isOverdue ? Icons.warning_amber_rounded : Icons.calendar_today_outlined, label: 'Thời hạn', value: _formatDate(task.dueDate), valueColor: _isOverdue ? AppColors.error : null, isDark: isDark)),
+                    Expanded(child: _MiniDetailItem(icon: _isOverdue ? Icons.warning_amber_rounded : Icons.calendar_today_outlined, label: 'Thời hạn', value: formatDueDate(task.dueDate), valueColor: _isOverdue ? AppColors.error : null, isDark: isDark)),
                   ]),
                   const SizedBox(height: 12),
                   Row(children: [
@@ -1016,7 +1304,7 @@ class TaskDetailSheet extends StatelessWidget {
     );
   }
 
-  String _formatDate(DateTime dt) => '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+  String _formatDate(DateTime dt) => formatDate(dt);
 }
 
 class _DetailItem extends StatelessWidget {
@@ -1223,8 +1511,8 @@ class TaskReportDetailSheet extends ConsumerWidget {
           const Divider(height: 1),
           Flexible(
             child: reportAsync.when(
-              data: (report) {
-                if (report == null) {
+              data: (reports) {
+                if (reports.isEmpty) {
                   return Center(child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -1236,6 +1524,8 @@ class TaskReportDetailSheet extends ConsumerWidget {
                     ],
                   ));
                 }
+                final sorted = [...reports]..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+                final report = sorted.first;
                 return SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
                   child: Column(
@@ -1329,7 +1619,7 @@ class TaskReportDetailSheet extends ConsumerWidget {
     );
   }
 
-  String _formatDateTime(DateTime dt) => '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  String _formatDateTime(DateTime dt) => formatDateTime(dt);
 }
 
 class _ReportDetailItem extends StatelessWidget {

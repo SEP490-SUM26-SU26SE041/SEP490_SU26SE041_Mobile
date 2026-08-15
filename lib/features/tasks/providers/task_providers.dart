@@ -96,35 +96,46 @@ class TaskRepository {
   Future<List<TaskModel>> generateByExperiment(String experimentId) =>
       _api.generateByExperiment(experimentId);
 
-  // ─── Task Report by Task ID ──────────────────────────────────────────
-
-  Future<internal.TaskReportModel?> getTaskReportByTaskId(String taskId) async {
-    final report = await _apiTaskReport.getReportByTask(taskId);
-    if (report == null) return null;
-    return internal.TaskReportModel(
-      id: report.id,
-      taskId: report.taskId,
-      title: report.reportText,
-      description: report.resultData?.additionalNotes ?? report.reportText,
-      submittedAt: report.reportedAt,
-      submittedBy: report.reporterName,
-      images: [],
-    );
+  // ─── Task Reports by Task ID ──────────────────────────────────────────
+  /// Trả về danh sách các reports theo taskId (một task có thể có nhiều
+  /// báo cáo theo thời gian).
+  Future<List<internal.TaskReportModel>> getTaskReportsByTaskId(String taskId) async {
+    final list = await _apiTaskReport.getReportsByTask(taskId);
+    return list.map((report) {
+      final rd = report.resultData;
+      final noteString = rd != null && rd['additionalNotes'] != null
+          ? rd['additionalNotes'].toString()
+          : null;
+      return internal.TaskReportModel(
+        id: report.id,
+        taskId: report.taskId,
+        title: report.taskTitle ?? report.reportText,
+        description: noteString ?? report.reportText,
+        submittedAt: report.reportedAt,
+        submittedBy: report.reporterName,
+        images: const [],
+        rawResultData: rd,
+      );
+    }).toList();
   }
 
   Future<List<internal.TaskImageModel>> getTaskImagesByTaskId(String taskId) async {
-    // Lấy report trước để có reportId
-    final report = await _apiTaskReport.getReportByTask(taskId);
-    if (report == null) return [];
-    final images = await _apiTaskImage.getImagesByReport(report.id);
-    return images.map((img) => internal.TaskImageModel(
-      id: img.id,
-      taskId: taskId,
-      reportId: img.taskReportId,
-      imageUrl: img.imageUrl,
-      uploadedAt: img.createdAt,
-      description: img.caption,
-    )).toList();
+    // BE trả về nhiều reports cho 1 task → lấy ảnh của tất cả reports.
+    final reports = await _apiTaskReport.getReportsByTask(taskId);
+    if (reports.isEmpty) return [];
+    final allImages = <internal.TaskImageModel>[];
+    for (final r in reports) {
+      final imgs = await _apiTaskImage.getImagesByReport(r.id);
+      allImages.addAll(imgs.map((img) => internal.TaskImageModel(
+        id: img.id,
+        taskId: taskId,
+        reportId: img.taskReportId,
+        imageUrl: img.imageUrl,
+        uploadedAt: img.createdAt,
+        description: img.caption,
+      )));
+    }
+    return allImages;
   }
 }
 
@@ -159,12 +170,13 @@ internal.TaskModel _toInternalTask(TaskModel api) {
 internal.TaskType _toInternalTaskType(TaskType t) {
   return switch (t) {
     TaskType.planting    => internal.TaskType.planting,
-    TaskType.watering   => internal.TaskType.watering,
+    TaskType.watering    => internal.TaskType.watering,
     TaskType.fertilizing => internal.TaskType.fertilizing,
     TaskType.observation => internal.TaskType.observation,
     TaskType.inspection  => internal.TaskType.inspection,
-    TaskType.harvest     => internal.TaskType.inspection,
-    TaskType.other       => internal.TaskType.inspection,
+    TaskType.harvest     => internal.TaskType.other,
+    TaskType.measurement => internal.TaskType.other,
+    TaskType.other       => internal.TaskType.other,
   };
 }
 
@@ -368,9 +380,9 @@ class AssignTaskParam {
 
 // ─── Task Report & Images (by Task ID) ─────────────────────────────────
 
-final taskReportByTaskProvider = FutureProvider.autoDispose.family<internal.TaskReportModel?, String>(
+final taskReportByTaskProvider = FutureProvider.autoDispose.family<List<internal.TaskReportModel>, String>(
   (ref, taskId) async {
-    return ref.read(taskRepoProvider).getTaskReportByTaskId(taskId);
+    return ref.read(taskRepoProvider).getTaskReportsByTaskId(taskId);
   },
 );
 

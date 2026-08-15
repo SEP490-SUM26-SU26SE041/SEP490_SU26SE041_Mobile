@@ -13,34 +13,28 @@ import 'package:flutter_application_2/features/experiments/presentation/create_e
 import 'package:flutter_application_2/features/tasks/presentation/tasks_screen.dart';
 import 'package:flutter_application_2/features/tasks/presentation/create_task_screen.dart';
 import 'package:flutter_application_2/features/notifications/presentation/notifications_screen.dart';
+import 'package:flutter_application_2/features/ai_scan/presentation/ai_scan_screen.dart';
+import 'package:flutter_application_2/features/measurement/presentation/measurement_statistics_screen.dart';
+import 'package:flutter_application_2/features/measurement/presentation/growth_chart_screen.dart';
 import 'package:flutter_application_2/features/chat/presentation/chat_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/student_dashboard_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/student_tasks_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/growth_log_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/student_chat_screen.dart';
+import 'package:flutter_application_2/features/student/presentation/student_task_detail_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_dashboard_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_tasks_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_report_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_iot_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_task_detail_screen.dart';
-import 'package:flutter_application_2/features/student/presentation/student_task_detail_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_chat_screen.dart';
-import 'package:flutter_application_2/features/farm_manager/presentation/farm_manager_dashboard_screen.dart';
-import 'package:flutter_application_2/features/farm_manager/presentation/farm_map_screen.dart';
-import 'package:flutter_application_2/features/farm_manager/presentation/request_review_screen.dart';
-import 'package:flutter_application_2/features/farm_manager/presentation/approved_experiments_screen.dart';
-import 'package:flutter_application_2/features/admin/presentation/admin_dashboard_screen.dart';
-import 'package:flutter_application_2/features/admin/presentation/user_management_screen.dart';
-import 'package:flutter_application_2/features/admin/presentation/system_settings_screen.dart';
 import 'package:flutter_application_2/core/theme/app_animation.dart';
 import 'package:flutter_application_2/shared/models/user_model.dart';
 
 String _initialRouteForRole(UserRole role) => switch (role) {
-  UserRole.researcher   => '/dashboard',
-  UserRole.student      => '/student/dashboard',
-  UserRole.technician   => '/tech/dashboard',
-  UserRole.farmManager  => '/fm/dashboard',
-  UserRole.admin        => '/admin/dashboard',
+  UserRole.researcher => '/dashboard',
+  UserRole.student   => '/student/dashboard',
+  UserRole.technician => '/tech/dashboard',
 };
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -51,18 +45,23 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final isLoggedIn = authState is AuthAuthenticated;
       final isSplashRoute = state.matchedLocation == '/splash';
-      final isIntroRoute = state.matchedLocation == '/intro';
-      final isLoginRoute = state.matchedLocation == '/login';
+      final isIntroRoute  = state.matchedLocation == '/intro';
+      final isLoginRoute  = state.matchedLocation == '/login';
       if (isSplashRoute || isIntroRoute) return null;
       if (!isLoggedIn && !isLoginRoute) return '/splash';
       if (isLoggedIn && isLoginRoute) {
         final role = authState.user.role;
         return _initialRouteForRole(role);
       }
-      if (isLoggedIn && (state.matchedLocation == '/splash' || state.matchedLocation == '/intro')) return '/login';
+      if (isLoggedIn &&
+          (state.matchedLocation == '/splash' ||
+           state.matchedLocation == '/intro')) {
+        return '/login';
+      }
       return null;
     },
     routes: [
+      // ── Auth ────────────────────────────────────────────────────────────────
       GoRoute(
         path: '/splash',
         pageBuilder: (context, state) => CustomTransitionPage(
@@ -91,7 +90,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
-      // ===================== RESEARCHER =====================
+      // ── RESEARCHER ───────────────────────────────────────────────────────
       ShellRoute(
         builder: (context, state, child) => MainShell(child: child),
         routes: [
@@ -117,7 +116,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: 'analytics',
                 pageBuilder: (context, state) => CustomTransitionPage(
                   key: state.pageKey,
-                  child: const Scaffold(body: MainShell(child: ExperimentListScreen(analyticsMode: true))),
+                  child: const Scaffold(
+                    body: MainShell(
+                      child: ExperimentListScreen(analyticsMode: true),
+                    ),
+                  ),
                   transitionsBuilder: _slideTransition,
                   transitionDuration: AppDuration.page,
                 ),
@@ -146,7 +149,8 @@ final routerProvider = Provider<GoRouter>((ref) {
                   GoRoute(
                     path: 'create-task',
                     pageBuilder: (context, state) {
-                      final expId = state.uri.queryParameters['expId'] ?? state.pathParameters['id'];
+                      final expId = state.uri.queryParameters['expId'] ??
+                          state.pathParameters['id'];
                       return CustomTransitionPage(
                         key: state.pageKey,
                         child: CreateTaskScreen(experimentId: expId),
@@ -201,12 +205,63 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
 
-      // ===================== STUDENT =====================
+      // ── AI Scan (shared) ─────────────────────────────────────────────────
+      GoRoute(
+        path: '/ai-scan',
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const Scaffold(body: MainShell(child: AiScanScreen())),
+          transitionsBuilder: _slideTransition,
+          transitionDuration: AppDuration.page,
+        ),
+      ),
+
+      // ── Measurement Statistics ────────────────────────────────────────
+      GoRoute(
+        path: '/dashboard/statistics/:stageId',
+        pageBuilder: (context, state) {
+          final stageId = state.pathParameters['stageId']!;
+          final stageName = state.uri.queryParameters['stageName'] ?? 'Thống kê';
+          return CustomTransitionPage(
+            key: state.pageKey,
+            child: MeasurementStatisticsScreen(
+              stageId: stageId,
+              stageName: stageName,
+            ),
+            transitionsBuilder: _slideTransition,
+            transitionDuration: AppDuration.page,
+          );
+        },
+      ),
+
+      // ── Growth Chart (xem chỉ số tăng trưởng theo batch) ─────────────
+      GoRoute(
+        path: '/growth/:batchId',
+        pageBuilder: (context, state) {
+          final batchId = state.pathParameters['batchId']!;
+          final batchCode = state.uri.queryParameters['batchCode'];
+          final experimentId = state.uri.queryParameters['experimentId'];
+          return CustomTransitionPage(
+            key: state.pageKey,
+            child: GrowthChartScreen(
+              batchId: batchId,
+              batchCode: batchCode,
+              experimentId: experimentId,
+            ),
+            transitionsBuilder: _slideTransition,
+            transitionDuration: AppDuration.page,
+          );
+        },
+      ),
+
+      // ── STUDENT ───────────────────────────────────────────────────────
       GoRoute(
         path: '/student/dashboard',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: StudentDashboardScreen())),
+          child: const Scaffold(
+            body: MainShell(child: StudentDashboardScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -215,7 +270,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/student/tasks',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: StudentTasksScreen())),
+          child: const Scaffold(
+            body: MainShell(child: StudentTasksScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -224,7 +281,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/student/tasks/:id',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: StudentTaskDetailScreen(taskId: state.pathParameters['id']!),
+          child: StudentTaskDetailScreen(
+            taskId: state.pathParameters['id']!,
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -233,7 +292,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/student/growth',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: GrowthLogScreen())),
+          child: const Scaffold(
+            body: MainShell(child: GrowthLogScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -242,18 +303,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/student/chat',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: StudentChatScreen())),
+          child: const Scaffold(
+            body: MainShell(child: StudentChatScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
       ),
 
-      // ===================== TECHNICIAN =====================
+      // ── TECHNICIAN ───────────────────────────────────────────────────
       GoRoute(
         path: '/tech/dashboard',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: TechnicianDashboardScreen())),
+          child: const Scaffold(
+            body: MainShell(child: TechnicianDashboardScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -262,7 +327,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tech/tasks',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: TechnicianTasksScreen())),
+          child: const Scaffold(
+            body: MainShell(child: TechnicianTasksScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -271,7 +338,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tech/tasks/:id',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: TechnicianTaskDetailScreen(taskId: state.pathParameters['id']!),
+          child: TechnicianTaskDetailScreen(
+            taskId: state.pathParameters['id']!,
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -280,7 +349,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tech/report',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: TechnicianReportScreen())),
+          child: const Scaffold(
+            body: MainShell(child: TechnicianReportScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -289,7 +360,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tech/chat',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: TechnicianChatScreen())),
+          child: const Scaffold(
+            body: MainShell(child: TechnicianChatScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -298,92 +371,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tech/iot',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: TechnicianIoTScreen())),
-          transitionsBuilder: _slideTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-
-      // ===================== FARM MANAGER =====================
-      GoRoute(
-        path: '/fm/dashboard',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: FarmManagerDashboardScreen())),
-          transitionsBuilder: _slideTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-      GoRoute(
-        path: '/fm/farm-map',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: FarmMapScreen())),
-          transitionsBuilder: _slideTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-      GoRoute(
-        path: '/fm/experiments',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: ApprovedExperimentsScreen())),
-          transitionsBuilder: _slideTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-      GoRoute(
-        path: '/fm/notifications',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: NotificationsScreen())),
-          transitionsBuilder: _slideTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-      GoRoute(
-        path: '/fm/requests',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const RequestReviewScreen(),
-          transitionsBuilder: _slideUpTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-
-      // ===================== ADMIN =====================
-      GoRoute(
-        path: '/admin/dashboard',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: AdminDashboardScreen())),
-          transitionsBuilder: _slideTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-      GoRoute(
-        path: '/admin/users',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: UserManagementScreen())),
-          transitionsBuilder: _slideTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-      GoRoute(
-        path: '/admin/settings',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: SystemSettingsScreen())),
-          transitionsBuilder: _slideTransition,
-          transitionDuration: AppDuration.page,
-        ),
-      ),
-      GoRoute(
-        path: '/admin/notifications',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          key: state.pageKey,
-          child: const Scaffold(body: MainShell(child: NotificationsScreen())),
+          child: const Scaffold(
+            body: MainShell(child: TechnicianIoTScreen()),
+          ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
         ),
@@ -391,6 +381,8 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+// ── Transitions ────────────────────────────────────────────────────────────────
 
 Widget _fadeTransition(
   BuildContext context,
