@@ -138,7 +138,12 @@ class _TaskReportActionPanelState extends ConsumerState<TaskReportActionPanel> {
       ref.invalidate(taskReportByTaskProvider(widget.task.id));
       ref.invalidate(taskImagesByTaskProvider(widget.task.id));
       ref.invalidate(myTasksProvider);
-      ref.invalidate(myTodayTasksProvider);
+      ref.invalidate(todayTasksApiProvider);
+      ref.invalidate(upcomingTasksApiProvider);
+      ref.invalidate(overdueTasksApiProvider);
+      ref.invalidate(completedTasksApiProvider);
+      // Đánh dấu task vừa report để UI tự động đổi status sang "Hoàn thành".
+      ref.invalidate(reportedTaskIdsProvider);
 
       if (!mounted) return;
       _showOutcomeSnack(outcome);
@@ -465,7 +470,10 @@ class _TaskReportActionPanelState extends ConsumerState<TaskReportActionPanel> {
       await ref.read(startTaskProvider(taskId).future);
       ref.invalidate(taskDetailProvider(taskId));
       ref.invalidate(myTasksProvider);
-      ref.invalidate(myTodayTasksProvider);
+      ref.invalidate(todayTasksApiProvider);
+      ref.invalidate(upcomingTasksApiProvider);
+      ref.invalidate(overdueTasksApiProvider);
+      ref.invalidate(completedTasksApiProvider);
       ref.invalidate(filteredMyTasksProvider);
       ref.invalidate(todayTasksLocalProvider);
       ref.invalidate(overdueTasksLocalProvider);

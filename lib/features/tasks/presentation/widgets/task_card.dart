@@ -34,8 +34,15 @@ class TaskCard extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
     final spec = getTaskVisualSpec(task.taskType);
-    final statusSpec = getStatusPillSpec(task.status);
-    final deadline = computeDeadlineChip(task.dueDate, task.status);
+    // Nếu task đã có report submitted → ép status "Hoàn thành" bất kể
+    // backend status (InProgress/Pending/Overdue…).
+    final effectiveStatus = (hasReport &&
+            task.status != api.TaskStatus.completed &&
+            task.status != api.TaskStatus.approved)
+        ? api.TaskStatus.completed
+        : task.status;
+    final statusSpec = getStatusPillSpec(effectiveStatus);
+    final deadline = computeDeadlineChip(task.dueDate, effectiveStatus);
 
     return Material(
       color: Colors.transparent,
@@ -49,11 +56,18 @@ class TaskCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(taskCardRadius),
-                border:
-                    Border.all(color: cs.outline.withAlpha(60), width: 0.8),
+                // Border nhấn mạnh cho task đã có báo cáo.
+                border: Border.all(
+                  color: hasReport
+                      ? AppColors.success.withAlpha(120)
+                      : cs.outline.withAlpha(60),
+                  width: hasReport ? 1.2 : 0.8,
+                ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withAlpha(8),
+                    color: hasReport
+                        ? AppColors.success.withAlpha(20)
+                        : Colors.black.withAlpha(8),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -99,24 +113,24 @@ class TaskCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  if (_hasExperiment || _hasBatch)
-                    Row(
+                  if (_hasExperiment || _hasBatch || hasReport)
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        if (_hasExperiment) ...[
+                        if (_hasExperiment)
                           _InfoChip(
                             icon: Icons.science_rounded,
                             label: task.experimentCode ?? '',
                             color: AppColors.info,
                           ),
-                          const SizedBox(width: AppSpacing.sm),
-                        ],
                         if (_hasBatch)
                           _InfoChip(
                             icon: Icons.inventory_2_outlined,
                             label: task.batchCode ?? '',
                             color: AppColors.primary,
                           ),
-                        const Spacer(),
                         if (hasReport)
                           const _ReportedBadge(),
                       ],
@@ -127,10 +141,10 @@ class TaskCard extends StatelessWidget {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          if (deadline != null) ...[
-                            _DeadlineChip(spec: deadline),
+                          if (deadline != null)
+                            Flexible(child: _DeadlineChip(spec: deadline)),
+                          if (deadline != null && !dense)
                             const SizedBox(width: AppSpacing.sm),
-                          ],
                           if (!dense)
                             Expanded(
                               child: _ProgressBar(
@@ -243,11 +257,15 @@ class _InfoChip extends StatelessWidget {
         children: [
           Icon(icon, size: 13, color: color),
           const SizedBox(width: 4),
-          Text(label,
-              style: tt.labelSmall?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 11)),
+          Flexible(
+            child: Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tt.labelSmall?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11)),
+          ),
         ],
       ),
     );
@@ -269,6 +287,8 @@ class _DeadlineChip extends StatelessWidget {
       ),
       child: Text(
         spec.label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(
             color: spec.color,
             fontWeight: FontWeight.w700,

@@ -215,8 +215,6 @@ class _TaskReportViewSheetState extends ConsumerState<_TaskReportViewSheet> {
                                 taskId: widget.taskId,
                                 tt: tt,
                                 cs: cs),
-                            const SizedBox(height: AppSpacing.lg),
-                            _ReadOnlyBanner(tt: tt, cs: cs),
                           ],
                         ),
                       ),
@@ -700,38 +698,6 @@ class _Row extends StatelessWidget {
               style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
         ),
       ],
-    );
-  }
-}
-
-class _ReadOnlyBanner extends StatelessWidget {
-  const _ReadOnlyBanner({required this.tt, required this.cs});
-  final TextTheme tt;
-  final ColorScheme cs;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: cs.onSurface.withAlpha(13),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outline.withAlpha(40)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.lock_outline_rounded,
-              size: 18, color: cs.onSurface.withAlpha(128)),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              'Mỗi task có thể có nhiều báo cáo theo thời gian. Báo cáo hiện tại chỉ xem (read-only).',
-              style: tt.bodySmall
-                  ?.copyWith(color: cs.onSurface.withAlpha(153)),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

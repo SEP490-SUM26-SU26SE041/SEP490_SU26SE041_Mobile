@@ -6,6 +6,7 @@ import '../../../core/api/models/task_model.dart' as tApi;
 import '../../../core/api/services/dashboard_api_service.dart';
 import '../../../core/api/services/task_api_service.dart';
 import '../../../shared/models/growth_task_model.dart' as internal;
+import '../../tasks/providers/my_tasks_provider.dart';
 
 /// Parallel fetch of (today, upcoming, overdue) tasks for current user.
 /// Designed for Student/Technician dashboards — mirrors the JS FE
@@ -125,16 +126,14 @@ final dashboardKpisProvider =
 
 final internalTaskListProvider =
     Provider.autoDispose<AsyncValue<List<internal.TaskModel>>>((ref) {
-  final bundle = ref.watch(taskKpiBundleProvider);
-  return bundle.when(
-    data: (b) {
-      final list = <tApi.TaskModel>[...b.today, ...b.upcoming, ...b.overdue];
-      return AsyncValue.data(list.map(_toInternal).toList());
-    },
-    loading: () => const AsyncValue<List<internal.TaskModel>>.loading(),
-    error: (e, st) =>
-        AsyncValue<List<internal.TaskModel>>.error(e, st),
-  );
+  return ref.watch(myTasksFlatProvider).when(
+        data: (list) {
+          return AsyncValue.data(list.map(_toInternal).toList());
+        },
+        loading: () => const AsyncValue<List<internal.TaskModel>>.loading(),
+        error: (e, st) =>
+            AsyncValue<List<internal.TaskModel>>.error(e, st),
+      );
 });
 
 internal.TaskModel _toInternal(tApi.TaskModel a) {

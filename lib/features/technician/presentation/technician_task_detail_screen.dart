@@ -15,6 +15,7 @@ import '../../tasks/presentation/widgets/task_image_picker.dart';
 import '../../tasks/presentation/widgets/measurement_recording_sheet.dart';
 import '../../tasks/presentation/widgets/modern_quick_report_sheet.dart';
 import '../../tasks/presentation/widgets/task_visual.dart';
+import '../../../shared/utils/report_field_labels.dart';
 
 class TechnicianTaskDetailScreen extends ConsumerStatefulWidget {
   const TechnicianTaskDetailScreen({super.key, required this.taskId});
@@ -516,7 +517,7 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
             icon: const Icon(Icons.flash_on_rounded,
                 size: 18, color: Colors.white),
             label: Text(
-              'Báo cáo nhanh · ${typeSpec.label}',
+              'Hoàn thành & Báo cáo · ${typeSpec.label}',
               style: tt.titleSmall
                   ?.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
             ),
@@ -630,24 +631,25 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
             ),
           );
         }
-        // Hiển thị danh sách lịch sử báo cáo (mới nhất trên đầu)
-        final sorted = [...reports]
-          ..sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+        // Mỗi task chỉ có 1 báo cáo chính — lấy báo cáo mới nhất.
+        final latest = [...reports]
+          .reduce((a, b) => a.submittedAt.isAfter(b.submittedAt) ? a : b);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(Icons.history_rounded, color: AppColors.success),
+                Icon(Icons.assignment_turned_in_rounded,
+                    color: AppColors.success, size: 18),
                 const SizedBox(width: AppSpacing.sm),
                 Text(
-                  'Lịch sử báo cáo (${sorted.length})',
+                  'Báo cáo',
                   style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
-            ...sorted.map((r) => _buildReportCard(r, tt, cs)),
+            _buildReportCard(latest, tt, cs),
           ],
         );
       },
@@ -698,14 +700,97 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            '${e.key}: ${e.value}',
+                            '${labelForReportKey(e.key)}: ${e.value}',
                             style: tt.labelSmall?.copyWith(color: AppColors.success),
                           ),
                         ))
                     .toList(),
               ),
             ],
+            // Ảnh minh chứng đính kèm báo cáo.
+            if (r.images.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              _buildReportImages(r.images, cs),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportImages(List<internal.TaskImageModel> images, ColorScheme cs) {
+    return SizedBox(
+      height: 88,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        itemCount: images.length,
+        separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
+        itemBuilder: (context, i) {
+          final img = images[i];
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: GestureDetector(
+              onTap: () => _showFullImage(context, img.imageUrl),
+              child: Image.network(
+                img.imageUrl,
+                width: 88,
+                height: 88,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return Container(
+                    width: 88,
+                    height: 88,
+                    color: cs.surfaceContainerHighest.withAlpha(80),
+                    alignment: Alignment.center,
+                    child: const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) => Container(
+                  width: 88,
+                  height: 88,
+                  color: cs.errorContainer.withAlpha(60),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: cs.error,
+                    size: 24,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showFullImage(BuildContext context, String imageUrl) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        child: InteractiveViewer(
+          child: Center(
+            child: Hero(
+              tag: imageUrl,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white,
+                  size: 64,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

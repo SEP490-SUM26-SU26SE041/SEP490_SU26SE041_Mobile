@@ -6,6 +6,7 @@ import '../../../core/api/models/task_model.dart' as taskApi;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../../shared/utils/time_greeting.dart';
 import '../../../shared/widgets/agritech_environment_background.dart';
 import '../../../shared/widgets/glass_widgets.dart';
 import '../../../shared/widgets/notification_bell.dart';
@@ -14,6 +15,7 @@ import '../../../shared/widgets/profile_button.dart';
 import '../../../shared/widgets/snms_card.dart';
 import '../../dashboard/providers/role_dashboard_providers.dart';
 import '../../notifications/providers/notification_providers.dart';
+import '../providers/technician_my_tasks_provider.dart';
 import '../providers/technician_task_providers.dart';
 
 class TechnicianDashboardScreen extends ConsumerWidget {
@@ -23,12 +25,34 @@ class TechnicianDashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final stats = ref.watch(technicianDashboardStatsProvider);
-    final kpiBundle = ref.watch(taskKpiBundleProvider);
     final overview = ref.watch(dashboardOverviewProvider);
     final unreadAsync = ref.watch(unreadNotificationsCountProvider);
     final alertsAsync = ref.watch(dashboardAlertsProvider);
     final unread = unreadAsync.maybeWhen(data: (n) => n, orElse: () => 0);
+    // Lấy counts trực tiếp từ 4 endpoint API → đồng bộ với TaskHub.
+    final myTasksAsync = ref.watch(technicianMyTasksProvider);
+    int bucketCount(TechnicianTaskBucket bucket) {
+      final set = myTasksAsync.maybeWhen(
+          data: (s) => s, orElse: () => TechnicianTaskBucketSet.empty);
+      switch (bucket) {
+        case TechnicianTaskBucket.today:
+          return set.today.length;
+        case TechnicianTaskBucket.upcoming:
+          return set.upcoming.length;
+        case TechnicianTaskBucket.overdue:
+          return set.overdue.length;
+        case TechnicianTaskBucket.completed:
+          return set.completed.length;
+        case TechnicianTaskBucket.all:
+          return set.today.length +
+              set.upcoming.length +
+              set.overdue.length +
+              set.completed.length;
+      }
+    }
+    final todayCount = bucketCount(TechnicianTaskBucket.today);
+    final upcomingCount = bucketCount(TechnicianTaskBucket.upcoming);
+    final overdueCount = bucketCount(TechnicianTaskBucket.overdue);
 
     return Scaffold(
       body: AgritechEnvironmentBackground(
@@ -37,11 +61,16 @@ class TechnicianDashboardScreen extends ConsumerWidget {
         child: SafeArea(
           child: RefreshIndicator(
             onRefresh: () async {
-              ref.invalidate(taskKpiBundleProvider);
               ref.invalidate(technicianDashboardStatsProvider);
               ref.invalidate(dashboardOverviewProvider);
               ref.invalidate(dashboardAlertsProvider);
               ref.invalidate(unreadNotificationsCountProvider);
+              ref.invalidate(technicianMyTasksProvider);
+              ref.invalidate(technicianMyTasksFlatProvider);
+              ref.invalidate(technicianTodayTasksApiProvider);
+              ref.invalidate(technicianUpcomingTasksApiProvider);
+              ref.invalidate(technicianOverdueTasksApiProvider);
+              ref.invalidate(technicianCompletedTasksApiProvider);
             },
             child: CustomScrollView(
               physics: const BouncingScrollPhysics(),
@@ -54,7 +83,12 @@ class TechnicianDashboardScreen extends ConsumerWidget {
                       children: [
                         _buildHeader(tt, unread),
                         const SizedBox(height: AppSpacing.xl),
-                        _buildKPIRow(stats, kpiBundle, overview),
+                        _buildKPIRow(
+                          todayCount: todayCount,
+                          upcomingCount: upcomingCount,
+                          overdueCount: overdueCount,
+                          overview: overview,
+                        ),
                         const SizedBox(height: AppSpacing.xl),
                         _buildQuickActions(context),
                         const SizedBox(height: AppSpacing.xl),
@@ -68,7 +102,7 @@ class TechnicianDashboardScreen extends ConsumerWidget {
                         _buildSectionHeader('Công việc hôm nay',
                             Icons.assignment_rounded, AppColors.primary),
                         const SizedBox(height: AppSpacing.md),
-                        _buildTodayTaskList(kpiBundle, tt, cs),
+                        _buildTodayTaskList(ref, tt, cs),
                         const SizedBox(height: AppSpacing.huge),
                       ],
                     ),
@@ -83,16 +117,40 @@ class TechnicianDashboardScreen extends ConsumerWidget {
   }
 
   Widget _buildHeader(TextTheme tt, int unread) {
+    final greeting = TimeGreeting.now();
     return Row(
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Chào buổi sáng!',
-                  style: tt.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: greeting.tone.withAlpha(25),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: greeting.tone.withAlpha(60), width: 1),
+                    ),
+                    child: Icon(greeting.icon,
+                        color: greeting.tone, size: 20),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Flexible(
+                    child: Text(greeting.text,
+                        style: tt.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xs),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
@@ -123,20 +181,12 @@ class TechnicianDashboardScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildKPIRow(
-    AsyncValue<TechDashboardStats> stats,
-    AsyncValue<TaskKpiBundle> bundle,
-    AsyncValue<DashboardOverviewModel> overview,
-  ) {
-    final todayCount = bundle.maybeWhen(
-        data: (b) => b.today.length,
-        orElse: () => 0);
-    final upcomingCount = bundle.maybeWhen(
-        data: (b) => b.upcoming.length,
-        orElse: () => 0);
-    final overdueCount = bundle.maybeWhen(
-        data: (b) => b.overdue.length,
-        orElse: () => 0);
+  Widget _buildKPIRow({
+    required int todayCount,
+    required int upcomingCount,
+    required int overdueCount,
+    required AsyncValue<DashboardOverviewModel> overview,
+  }) {
     final measurementCount = overview.maybeWhen(
         data: (o) => o.totalMeasurementRecords,
         orElse: () => 0);
@@ -311,14 +361,15 @@ class TechnicianDashboardScreen extends ConsumerWidget {
   }
 
   Widget _buildTodayTaskList(
-    AsyncValue<TaskKpiBundle> bundle,
+    WidgetRef ref,
     TextTheme tt,
     ColorScheme cs,
   ) {
-    return bundle.when(
-      data: (b) {
-        final list = b.today.take(5).toList();
-        if (list.isEmpty) {
+    final todayAsync = ref.watch(technicianTodayTasksApiProvider);
+    return todayAsync.when(
+      data: (list) {
+        final items = list.take(5).toList();
+        if (items.isEmpty) {
           return SNMSCard(
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
@@ -340,7 +391,7 @@ class TechnicianDashboardScreen extends ConsumerWidget {
           );
         }
         return Column(
-          children: list
+          children: items
               .map((t) => Padding(
                     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                     child: _TaskRow(task: t, tt: tt, cs: cs),

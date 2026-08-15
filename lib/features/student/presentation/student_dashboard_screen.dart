@@ -6,6 +6,7 @@ import '../../../core/api/models/task_model.dart' as taskApi;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_utils.dart';
+import '../../../shared/utils/time_greeting.dart';
 import '../../../shared/widgets/agritech_environment_background.dart';
 import '../../../shared/widgets/glass_widgets.dart';
 import '../../../shared/widgets/notification_bell.dart';
@@ -14,6 +15,8 @@ import '../../../shared/widgets/profile_button.dart';
 import '../../../shared/widgets/snms_card.dart';
 import '../../dashboard/providers/role_dashboard_providers.dart';
 import '../../notifications/providers/notification_providers.dart';
+import '../../tasks/presentation/widgets/task_visual.dart';
+import '../../tasks/providers/my_tasks_provider.dart';
 import 'growth_log_screen.dart' show growthRecordsProvider;
 
 class StudentDashboardScreen extends ConsumerWidget {
@@ -23,12 +26,36 @@ class StudentDashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final kpiBundle = ref.watch(taskKpiBundleProvider);
     final overview = ref.watch(dashboardOverviewProvider);
     final alertsAsync = ref.watch(dashboardAlertsProvider);
     final unreadAsync = ref.watch(unreadNotificationsCountProvider);
     // Đếm measurement records từ cache (fallback khi dashboard trả 0).
     final growthRecordsAsync = ref.watch(growthRecordsProvider);
+    // Dùng chung nguồn với TaskHub để counts KPI đồng bộ với tab Công việc.
+    // Lấy counts trực tiếp từ 4 endpoint API → đồng bộ với TaskHub.
+    final myTasksAsync = ref.watch(myTasksProvider);
+    int bucketCount(TaskFilterBucket bucket) {
+      final set = myTasksAsync.maybeWhen(
+          data: (s) => s, orElse: () => TaskBucketSet.empty);
+      switch (bucket) {
+        case TaskFilterBucket.today:
+          return set.today.length;
+        case TaskFilterBucket.upcoming:
+          return set.upcoming.length;
+        case TaskFilterBucket.overdue:
+          return set.overdue.length;
+        case TaskFilterBucket.completed:
+          return set.completed.length;
+        case TaskFilterBucket.all:
+          return set.today.length +
+              set.upcoming.length +
+              set.overdue.length +
+              set.completed.length;
+      }
+    }
+    final todayCount = bucketCount(TaskFilterBucket.today);
+    final upcomingCount = bucketCount(TaskFilterBucket.upcoming);
+    final overdueCount = bucketCount(TaskFilterBucket.overdue);
 
     return Scaffold(
       body: AgritechEnvironmentBackground(
@@ -37,11 +64,12 @@ class StudentDashboardScreen extends ConsumerWidget {
         child: SafeArea(
           child: RefreshIndicator(
             onRefresh: () async {
-              ref.invalidate(taskKpiBundleProvider);
               ref.invalidate(dashboardOverviewProvider);
               ref.invalidate(dashboardAlertsProvider);
               ref.invalidate(notificationsListProvider);
               ref.invalidate(unreadNotificationsCountProvider);
+              ref.invalidate(myTasksProvider);
+              ref.invalidate(myTasksFlatProvider);
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -52,7 +80,9 @@ class StudentDashboardScreen extends ConsumerWidget {
                   _HeaderSection(tt: tt, cs: cs),
                   const SizedBox(height: AppSpacing.xl),
                   _KPIRow(
-                    kpiBundle: kpiBundle,
+                    todayCount: todayCount,
+                    upcomingCount: upcomingCount,
+                    overdueCount: overdueCount,
                     overview: overview,
                     measurementFallback:
                         growthRecordsAsync.maybeWhen(
@@ -76,9 +106,14 @@ class StudentDashboardScreen extends ConsumerWidget {
                   const SizedBox(height: AppSpacing.md),
                   const PlantPhotoGallery(maxPhotos: 5),
                   const SizedBox(height: AppSpacing.xl),
-                  _TodayTasksSection(context: context, bundle: kpiBundle),
+                  _TodayTasksSection(context: context, today: myTasksAsync.maybeWhen(
+                    data: (s) => s.today, orElse: () => const [])),
                   const SizedBox(height: AppSpacing.lg),
-                  _UpcomingTasksSection(context: context, bundle: kpiBundle),
+                  _UpcomingTasksSection(
+                      context: context,
+                      upcoming: myTasksAsync.maybeWhen(
+                          data: (s) => s.upcoming,
+                          orElse: () => const [])),
                   const SizedBox(height: AppSpacing.xl),
                 ],
               ),
@@ -92,23 +127,21 @@ class StudentDashboardScreen extends ConsumerWidget {
 
 class _KPIRow extends StatelessWidget {
   const _KPIRow({
-    required this.kpiBundle,
+    required this.todayCount,
+    required this.upcomingCount,
+    required this.overdueCount,
     required this.overview,
     required this.measurementFallback,
   });
 
-  final AsyncValue<TaskKpiBundle> kpiBundle;
+  final int todayCount;
+  final int upcomingCount;
+  final int overdueCount;
   final AsyncValue<DashboardOverviewModel> overview;
   final int measurementFallback;
 
   @override
   Widget build(BuildContext context) {
-    final todayCount =
-        kpiBundle.maybeWhen(data: (b) => b.today.length, orElse: () => 0);
-    final upcomingCount =
-        kpiBundle.maybeWhen(data: (b) => b.upcoming.length, orElse: () => 0);
-    final overdueCount =
-        kpiBundle.maybeWhen(data: (b) => b.overdue.length, orElse: () => 0);
     final measurementCount = overview.maybeWhen(
         data: (o) {
           final fromApi = o.totalMeasurementRecords;
@@ -420,15 +453,15 @@ class _AlertCard extends StatelessWidget {
 }
 
 class _TodayTasksSection extends StatelessWidget {
-  const _TodayTasksSection({required this.context, required this.bundle});
+  const _TodayTasksSection({required this.context, required this.today});
   final BuildContext context;
-  final AsyncValue<TaskKpiBundle> bundle;
+  final List<taskApi.TaskModel> today;
 
   @override
   Widget build(BuildContext _) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final list = bundle.maybeWhen(data: (b) => b.today, orElse: () => const []);
+    final list = today;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -480,16 +513,15 @@ class _TodayTasksSection extends StatelessWidget {
 }
 
 class _UpcomingTasksSection extends StatelessWidget {
-  const _UpcomingTasksSection({required this.context, required this.bundle});
+  const _UpcomingTasksSection({required this.context, required this.upcoming});
   final BuildContext context;
-  final AsyncValue<TaskKpiBundle> bundle;
+  final List<taskApi.TaskModel> upcoming;
 
   @override
   Widget build(BuildContext _) {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final list =
-        bundle.maybeWhen(data: (b) => b.upcoming, orElse: () => const []);
+    final list = upcoming;
     if (list.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -652,15 +684,7 @@ class _HeaderSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hour = DateTime.now().hour;
-    String greeting;
-    if (hour < 12) {
-      greeting = 'Chào buổi sáng!';
-    } else if (hour < 18) {
-      greeting = 'Chào buổi chiều!';
-    } else {
-      greeting = 'Chào buổi tối!';
-    }
+    final greeting = TimeGreeting.now();
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -668,9 +692,33 @@ class _HeaderSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(greeting,
-                  style: tt.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+              Row(
+                children: [
+                  // Icon mặt trời / mặt trăng theo giờ — tone màu động.
+                  Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: greeting.tone.withAlpha(25),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: greeting.tone.withAlpha(60), width: 1),
+                    ),
+                    child: Icon(greeting.icon,
+                        color: greeting.tone, size: 20),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Flexible(
+                    child: Text(greeting.text,
+                        style: tt.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
               const SizedBox(height: AppSpacing.xs),
               Container(
                 padding:

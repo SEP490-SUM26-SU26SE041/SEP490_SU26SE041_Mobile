@@ -295,10 +295,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             ),
                             const SizedBox(width: AppSpacing.sm),
                             Text(
-                              'Chao mung ban!',
-                              style: tt.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
+                              'Chào mừng bạn!',
+                              style: tt.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
                                 color: cs.onSurface,
+                                letterSpacing: -0.5,
                               ),
                             ),
                           ],
@@ -307,13 +308,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         Padding(
                           padding: const EdgeInsets.only(left: 12),
                           child: Text(
-                            'Dang nhap de tiep tuc',
+                            'Đăng nhập để tiếp tục',
                             style: tt.bodyMedium?.copyWith(
-                              color: cs.onSurface.withAlpha(128),
+                              color: cs.onSurface.withAlpha(140),
+                              height: 1.4,
                             ),
                           ),
                         ),
                         const SizedBox(height: AppSpacing.xl),
+
+                        // Divider ngăn cách header & form
+                        Container(
+                          height: 1,
+                          margin: const EdgeInsets.only(bottom: AppSpacing.xl),
+                          color: cs.outline.withAlpha(40),
+                        ),
 
                         // Email field
                         _buildField(
@@ -324,27 +333,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
                           validator: (v) {
-                            if (v == null || v.trim().isEmpty) return 'Vui long nhap email';
-                            if (!v.contains('@')) return 'Email khong hop le';
+                            if (v == null || v.trim().isEmpty) return 'Vui lòng nhập email';
+                            if (!v.contains('@')) return 'Email không hợp lệ';
                             return null;
                           },
                           tt: tt,
                           cs: cs,
                           isDark: isDark,
                         ),
-                        const SizedBox(height: AppSpacing.md),
+                        const SizedBox(height: AppSpacing.lg),
 
                         // Password field
                         _buildField(
-                          label: 'Mat khau',
-                          hint: '',
+                          label: 'Mật khẩu',
+                          hint: 'Nhập mật khẩu của bạn',
                           icon: Icons.lock_outlined,
                           controller: _passwordController,
                           obscureText: _obscurePassword,
                           textInputAction: TextInputAction.done,
                           onFieldSubmitted: (_) => _login(),
                           validator: (v) {
-                            if (v == null || v.isEmpty) return 'Vui long nhap mat khau';
+                            if (v == null || v.isEmpty) return 'Vui lòng nhập mật khẩu';
+                            if (v.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự';
                             return null;
                           },
                           tt: tt,
@@ -353,34 +363,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           suffix: IconButton(
                             icon: Icon(
                               _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                              color: cs.onSurface.withAlpha(102),
+                              color: cs.onSurface.withAlpha(128),
                               size: 20,
                             ),
                             onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                           ),
                         ),
-                        const SizedBox(height: AppSpacing.xs),
-
-                        // Forgot password
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: () {},
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: const Size(0, 0),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: Text(
-                              'Quen mat khau?',
-                              style: tt.labelMedium?.copyWith(
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
+                        const SizedBox(height: AppSpacing.xl),
 
                         // Error message
                         if (isError) ...[
@@ -412,7 +401,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           animation: _plantController,
                           builder: (context, _) {
                             return SizedBox(
-                              height: 52,
+                              height: 54,
                               child: ElevatedButton(
                                 onPressed: isLoading ? null : _login,
                                 style: ElevatedButton.styleFrom(
@@ -443,7 +432,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                           ),
                                           const SizedBox(width: AppSpacing.sm),
                                           Text(
-                                            'Dang nhap',
+                                            'Đăng nhập',
                                             style: tt.labelLarge?.copyWith(
                                               color: Colors.white,
                                               fontWeight: FontWeight.w600,

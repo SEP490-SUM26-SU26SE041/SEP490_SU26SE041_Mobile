@@ -282,10 +282,10 @@ List<api.TaskModel> applyBucketFilter(
       return source.where((t) => classifyTask(t) == TaskFilterBucket.today)
           .toList();
     case TaskFilterBucket.upcoming:
+      // Chỉ tasks tương lai (diff > 0), loại trừ today tasks
+      // (today tasks đã được bucket "Hôm nay" xử lý riêng).
       return source
-          .where((t) =>
-              classifyTask(t) == TaskFilterBucket.upcoming ||
-              classifyTask(t) == TaskFilterBucket.today)
+          .where((t) => classifyTask(t) == TaskFilterBucket.upcoming)
           .toList();
     case TaskFilterBucket.overdue:
       return source.where((t) => classifyTask(t) == TaskFilterBucket.overdue)

@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/api/models/task_model.dart' as api;
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/date_utils.dart';
+import '../../../tasks/providers/my_tasks_provider.dart';
+import '../../../tasks/providers/task_providers.dart';
 import 'task_card.dart';
 import 'task_visual.dart';
 
@@ -33,8 +35,9 @@ class TaskHub extends ConsumerWidget {
     this.onCompleteTask,
   });
 
-  /// `AsyncValue<List<TaskModel>>` từ provider gốc (today/upcoming/overdue/my).
-  final AsyncValue<List<api.TaskModel>> tasks;
+  /// `AsyncValue<TaskBucketSet>` từ provider — 4 bucket riêng biệt khớp với
+  /// các API tương ứng (today/upcoming/overdue/completed).
+  final AsyncValue<TaskBucketSet> tasks;
 
   /// Route prefix cho task detail (`student` | `technician`).
   final String rolePath;
@@ -58,22 +61,50 @@ class TaskHub extends ConsumerWidget {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final bucket = ref.watch(taskHubBucketProvider);
-    final all = tasks.maybeWhen<List<api.TaskModel>>(
-        data: (l) => l, orElse: () => const []);
+    final buckets = tasks.maybeWhen<TaskBucketSet>(
+        data: (s) => s, orElse: () => TaskBucketSet.empty);
+    // Tập taskId đã có report (dùng để override status "Hoàn thành").
+    final reportedIds = ref.watch(reportedTaskIdsProvider).maybeWhen(
+          data: (s) => s,
+          orElse: () => <String>{},
+        );
 
-    // Tính count từng bucket để hiển thị badge.
-    final counts = <TaskFilterBucket, int>{
-      TaskFilterBucket.today: 0,
-      TaskFilterBucket.upcoming: 0,
-      TaskFilterBucket.overdue: 0,
-      TaskFilterBucket.completed: 0,
-      TaskFilterBucket.all: all.length,
-    };
-    for (final t in all) {
-      final c = classifyTask(t);
-      counts[c] = (counts[c] ?? 0) + 1;
+    // Lấy danh sách task cho bucket đang chọn — KHỚP với API trả về (1-1).
+    List<api.TaskModel> filtered;
+    switch (bucket) {
+      case TaskFilterBucket.today:
+        filtered = buckets.today;
+        break;
+      case TaskFilterBucket.upcoming:
+        filtered = buckets.upcoming;
+        break;
+      case TaskFilterBucket.overdue:
+        filtered = buckets.overdue;
+        break;
+      case TaskFilterBucket.completed:
+        filtered = buckets.completed;
+        break;
+      case TaskFilterBucket.all:
+        // All = union 4 bucket đã dedupe.
+        final seen = <String>{};
+        filtered = [];
+        for (final t in [
+          ...buckets.overdue,
+          ...buckets.today,
+          ...buckets.upcoming,
+          ...buckets.completed,
+        ]) {
+          if (seen.add(t.id)) filtered.add(t);
+        }
+        break;
     }
-    final filtered = applyBucketFilter(all, bucket);
+    final counts = <TaskFilterBucket, int>{
+      TaskFilterBucket.today: buckets.today.length,
+      TaskFilterBucket.upcoming: buckets.upcoming.length,
+      TaskFilterBucket.overdue: buckets.overdue.length,
+      TaskFilterBucket.completed: buckets.completed.length,
+      TaskFilterBucket.all: filtered.length,
+    };
     final grouped = sortedGroups(groupTasksByDate(filtered));
 
     return Column(
@@ -112,69 +143,72 @@ class TaskHub extends ConsumerWidget {
               if (grouped.isEmpty) {
                 return _EmptyBucket(bucket: bucket, cs: cs, tt: tt);
               }
+              // Build danh sách widget: mỗi group có 1 header + N tasks.
+              final children = <Widget>[];
+              for (final entry in grouped) {
+                // Header cho nhóm ngày.
+                children.add(
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.sm, AppSpacing.lg,
+                        AppSpacing.sm, AppSpacing.sm),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: cs.primary,
+                            borderRadius:
+                                BorderRadius.circular(3),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(entry.key,
+                            style: tt.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700)),
+                        const Spacer(),
+                        Text(
+                          '${entry.value.length} tác vụ',
+                          style: tt.labelMedium?.copyWith(
+                              color: cs.onSurface
+                                  .withAlpha(153)),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+                // Mỗi task trong nhóm.
+                for (final t2 in entry.value) {
+                  children.add(
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: TaskCard(
+                        task: t2,
+                        hasReport: reportedIds.contains(t2.id),
+                        onTap: () =>
+                            context.push('/$rolePath/tasks/${t2.id}'),
+                      ),
+                    ),
+                  );
+                }
+              }
               return RefreshIndicator(
                 onRefresh: () async {
+                  // Re-fetch toàn bộ task + reports để cập nhật badge "Đã báo cáo".
+                  ref.invalidate(reportedTaskIdsProvider);
+                  ref.invalidate(myTasksProvider);
                   final c = ref.read(taskHubBucketProvider.notifier).state;
                   ref.read(taskHubBucketProvider.notifier).state = c;
-                  await Future.delayed(const Duration(milliseconds: 200));
+                  await Future.delayed(const Duration(milliseconds: 300));
                 },
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(
                       AppSpacing.md, AppSpacing.sm, AppSpacing.md,
                       AppSpacing.huge),
-                  itemCount: grouped.length * 2,
-                  itemBuilder: (context, i) {
-                    final isHeader = i.isEven;
-                    final idx = i ~/ 2;
-                    if (isHeader) {
-                      final entry = grouped[idx];
-                      return Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.sm, AppSpacing.lg,
-                            AppSpacing.sm, AppSpacing.sm),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 6,
-                              height: 18,
-                              decoration: BoxDecoration(
-                                color: cs.primary,
-                                borderRadius:
-                                    BorderRadius.circular(3),
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
-                            Text(entry.key,
-                                style: tt.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w700)),
-                            const Spacer(),
-                            Text(
-                              '${entry.value.length} tác vụ',
-                              style: tt.labelMedium?.copyWith(
-                                  color: cs.onSurface
-                                      .withAlpha(153)),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                    final entry = grouped[idx];
-                    // Compute actual index of task in group.
-                    final taskIdx = (i - 1) ~/ 2 - idx;
-                    final t2 = taskIdx >= 0 && taskIdx < entry.value.length
-                        ? entry.value[taskIdx]
-                        : null;
-                    if (t2 == null) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(
-                          bottom: AppSpacing.sm),
-                      child: TaskCard(
-                        task: t2,
-                        onTap: () =>
-                            context.push('/$rolePath/tasks/${t2.id}'),
-                      ),
-                    );
-                  },
+                  itemCount: children.length,
+                  itemBuilder: (_, i) => children[i],
                 ),
               );
             },

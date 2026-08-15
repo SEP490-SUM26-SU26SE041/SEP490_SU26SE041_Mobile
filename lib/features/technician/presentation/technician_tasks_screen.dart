@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../tasks/presentation/widgets/task_hub.dart';
-import '../../tasks/providers/my_tasks_provider.dart';
+import '../providers/technician_my_tasks_provider.dart';
 
 class TechnicianTasksScreen extends ConsumerWidget {
   const TechnicianTasksScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tasks = ref.watch(myTasksProvider);
+    final tasks = ref.watch(technicianBucketAsSharedProvider);
     return Scaffold(
       body: SafeArea(
         child: TaskHub(

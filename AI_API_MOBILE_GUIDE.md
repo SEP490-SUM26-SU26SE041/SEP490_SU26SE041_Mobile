@@ -993,3 +993,23 @@ if (!isHealthy) {
 - **Swagger UI - Argo_Pest**: https://argo-pest-api.onrender.com/docs
 - **OpenAPI Spec - NhanDangBenhLaCaChua**: https://tomato-onnx-backend.onrender.com/openapi.json
 - **OpenAPI Spec - Argo_Pest**: https://argo-pest-api.onrender.com/openapi.json
+
+---
+
+## 9. Backend SmartFarm Task Images — Lưu ý quan trọng
+
+**Quy ước nhúng ảnh** (đã thấy qua logs ngày 2026-08-15):
+
+- Backend trả `images: [...]` **inline trong từng report** khi gọi `GET /api/task-reports/task/{taskId}`.
+- Endpoint `GET /api/task-images/report/{reportId}` trả **404 Not Found** → KHÔNG dùng endpoint này riêng lẻ.
+- Khi cần ảnh của task → parse `report.images` từ response của `/task-reports/task/{taskId}`.
+
+**Code pattern đang dùng**:
+```dart
+final reports = await _apiTaskReport.getReportsByTask(taskId);
+for (final r in reports) {
+  for (final img in r.images ?? const []) {
+    // img.imageUrl (Cloudinary URL), img.taskReportId, img.id...
+  }
+}
+```

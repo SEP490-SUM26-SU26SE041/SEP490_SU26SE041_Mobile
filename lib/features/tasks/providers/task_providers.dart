@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/models/task_model.dart';
+import '../../../core/api/models/task_report_model.dart';
 import '../../../core/api/services/task_api_service.dart';
 import '../../../core/api/services/task_report_api_service.dart';
 import '../../../core/api/services/task_image_api_service.dart';
 import '../../../shared/models/growth_task_model.dart' as internal;
+import 'my_tasks_provider.dart';
 
 // ─── Repository ────────────────────────────────────────────────────────
 
@@ -120,20 +122,23 @@ class TaskRepository {
   }
 
   Future<List<internal.TaskImageModel>> getTaskImagesByTaskId(String taskId) async {
-    // BE trả về nhiều reports cho 1 task → lấy ảnh của tất cả reports.
+    // Backend `/task-reports/task/{taskId}` returns reports kèm `images` embed
+    // sẵn (xem logs). Không cần gọi `/task-images/report/{id}` (endpoint này
+    // trả 404). Dùng trực tiếp `report.images`.
     final reports = await _apiTaskReport.getReportsByTask(taskId);
-    if (reports.isEmpty) return [];
     final allImages = <internal.TaskImageModel>[];
     for (final r in reports) {
-      final imgs = await _apiTaskImage.getImagesByReport(r.id);
-      allImages.addAll(imgs.map((img) => internal.TaskImageModel(
-        id: img.id,
-        taskId: taskId,
-        reportId: img.taskReportId,
-        imageUrl: img.imageUrl,
-        uploadedAt: img.createdAt,
-        description: img.caption,
-      )));
+      final imgs = r.images ?? const <TaskImageModel>[];
+      for (final img in imgs) {
+        allImages.add(internal.TaskImageModel(
+          id: img.id,
+          taskId: taskId,
+          reportId: img.taskReportId,
+          imageUrl: img.imageUrl,
+          uploadedAt: img.createdAt,
+          description: img.caption,
+        ));
+      }
     }
     return allImages;
   }
@@ -391,3 +396,25 @@ final taskImagesByTaskProvider = FutureProvider.autoDispose.family<List<internal
     return ref.read(taskRepoProvider).getTaskImagesByTaskId(taskId);
   },
 );
+
+/// Tập `taskId` đã có ít nhất 1 report (dùng để hiển thị badge "Đã báo cáo"
+/// và ép status "Hoàn thành" cho task list).
+///
+/// Cách hoạt động: lặp qua tất cả tasks của user (4 bucket union),
+/// gọi `getReportsByTask(taskId)` song song → lấy tập taskId đã có report.
+final reportedTaskIdsProvider =
+    FutureProvider.autoDispose<Set<String>>((ref) async {
+  final repo = ref.read(taskRepoProvider);
+  final tasks = await ref.read(myTasksFlatProvider.future);
+  final results = await Future.wait(
+    tasks.map((t) async {
+      try {
+        final reports = await repo.getTaskReportsByTaskId(t.id);
+        return reports.isNotEmpty ? t.id : null;
+      } catch (_) {
+        return null;
+      }
+    }),
+  );
+  return results.whereType<String>().toSet();
+});

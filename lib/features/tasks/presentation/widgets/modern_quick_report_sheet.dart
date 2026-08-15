@@ -313,7 +313,7 @@ class _QuickReportSheetState extends ConsumerState<_QuickReportSheet>
       effectiveDefinitions:
           effectiveDefs.isEmpty ? null : effectiveDefs,
       bridgeOutput: bridgeOutput,
-      markComplete: false,
+      markComplete: true,
       hasNewContent: true,
     );
 
@@ -327,7 +327,10 @@ class _QuickReportSheetState extends ConsumerState<_QuickReportSheet>
       ref.invalidate(taskReportByTaskProvider(widget.task.id));
       ref.invalidate(taskImagesByTaskProvider(widget.task.id));
       ref.invalidate(myTasksProvider);
-      ref.invalidate(myTodayTasksProvider);
+      ref.invalidate(todayTasksApiProvider);
+      ref.invalidate(upcomingTasksApiProvider);
+      ref.invalidate(overdueTasksApiProvider);
+      ref.invalidate(completedTasksApiProvider);
       ref.invalidate(filteredMyTasksProvider);
       ref.invalidate(todayTasksLocalProvider);
       ref.invalidate(overdueTasksLocalProvider);

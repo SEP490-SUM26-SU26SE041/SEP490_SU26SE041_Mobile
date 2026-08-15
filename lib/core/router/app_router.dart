@@ -23,6 +23,7 @@ import 'package:flutter_application_2/features/student/presentation/growth_log_s
 import 'package:flutter_application_2/features/student/presentation/student_chat_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/student_task_detail_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_dashboard_screen.dart';
+import 'package:flutter_application_2/features/technician/presentation/technician_growth_log_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_tasks_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_report_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_iot_screen.dart';
@@ -373,6 +374,17 @@ final routerProvider = Provider<GoRouter>((ref) {
           key: state.pageKey,
           child: const Scaffold(
             body: MainShell(child: TechnicianIoTScreen()),
+          ),
+          transitionsBuilder: _slideTransition,
+          transitionDuration: AppDuration.page,
+        ),
+      ),
+      GoRoute(
+        path: '/tech/growth',
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const Scaffold(
+            body: MainShell(child: TechnicianGrowthLogScreen()),
           ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,

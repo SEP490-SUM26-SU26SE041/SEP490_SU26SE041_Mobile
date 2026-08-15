@@ -4,78 +4,116 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/models/task_model.dart' as api;
 import '../../tasks/providers/task_providers.dart';
 
-/// Unified task provider — dùng cho TaskHub (Student/Technician).
-///
-/// Trả về danh sách tasks đầy đủ để classify theo bucket (`today`/`upcoming`/
-/// `overdue`/`completed`/`all`). Backend `/tasks/my` đôi khi filter sẵn theo
-/// status mặc định (vd chỉ InProgress), nên ta **merge** kết quả từ 3 API
-/// riêng biệt:
-/// - `GET /tasks/today` → deadline = hôm nay
-/// - `GET /tasks/upcoming?days=14` → deadline trong 14 ngày tới
-/// - `GET /tasks/overdue` → đã quá hạn
-///
-/// Sau đó dedupe theo `task.id` rồi sort theo `dueDate` tăng dần.
-final myTasksProvider =
+/// `GET /tasks/today` — đúng những gì backend trả về.
+final todayTasksApiProvider =
     FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
-  final repo = ref.read(taskRepoProvider);
-
-  // Gọi parallel 3 endpoint + myTasks để bắt mọi status filter mặc định.
-  final results = await Future.wait([
-    _safe(() => repo.getTodayTasks()),
-    _safe(() => repo.getUpcomingTasks(days: 14)),
-    _safe(() => repo.getOverdueTasks()),
-    _safe(() => repo.getMyTasks()),
-  ]);
-
-  final seen = <String>{};
-  final merged = <api.TaskModel>[];
-  for (final list in results) {
-    for (final t in list) {
-      if (seen.add(t.id)) merged.add(t);
-    }
-  }
-
-  // Lấy thêm các task đã hoàn thành từ `getMyTasks(status=['Completed'])`
-  // để bucket "Hoàn thành" hiển thị đầy đủ.
   try {
-    final completed = await repo.getMyTasks(status: const ['Completed', 'Approved', 'Submitted']);
-    for (final t in completed) {
-      if (seen.add(t.id)) merged.add(t);
-    }
-  } catch (_) {}
-
-  // Loại bỏ cancelled (không còn liên quan).
-  final active = merged
-      .where((t) => t.status != api.TaskStatus.cancelled)
-      .toList();
-  // Sort theo dueDate tăng dần (sớm nhất trước) → overdue đầu, today giữa, upcoming cuối.
-  active.sort((a, b) => a.dueDate.compareTo(b.dueDate));
-  return active;
-});
-
-Future<List<api.TaskModel>> _safe(
-    Future<List<api.TaskModel>> Function() fn) async {
-  try {
-    return await fn();
+    return await ref.read(taskRepoProvider).getTodayTasks();
   } catch (_) {
     return <api.TaskModel>[];
   }
+});
+
+/// `GET /tasks/upcoming?days=14` — đúng những gì backend trả về.
+final upcomingTasksApiProvider =
+    FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
+  try {
+    return await ref.read(taskRepoProvider).getUpcomingTasks(days: 14);
+  } catch (_) {
+    return <api.TaskModel>[];
+  }
+});
+
+/// `GET /tasks/overdue` — đúng những gì backend trả về.
+final overdueTasksApiProvider =
+    FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
+  try {
+    return await ref.read(taskRepoProvider).getOverdueTasks();
+  } catch (_) {
+    return <api.TaskModel>[];
+  }
+});
+
+/// `GET /tasks/my?status=Completed|Approved|Submitted` — đúng những gì backend trả về.
+final completedTasksApiProvider =
+    FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
+  try {
+    return await ref.read(taskRepoProvider).getMyTasks(
+          status: const ['Completed', 'Approved', 'Submitted'],
+        );
+  } catch (_) {
+    return <api.TaskModel>[];
+  }
+});
+
+/// Unified task provider — dùng cho TaskHub (Student/Technician).
+///
+/// Mỗi bucket lấy trực tiếp từ endpoint tương ứng để hiển thị đúng những gì
+/// API trả về (không classify lại client-side, tránh sai lệch với backend):
+/// - `todayTasksApiProvider` → `/tasks/today`
+/// - `upcomingTasksApiProvider` → `/tasks/upcoming?days=14`
+/// - `overdueTasksApiProvider` → `/tasks/overdue`
+/// - `completedTasksApiProvider` → `/tasks/my?status=Completed|Approved|Submitted`
+///
+/// Trả về `TaskBucketSet` chứa 4 list riêng biệt cho từng filter chip.
+class TaskBucketSet {
+  const TaskBucketSet({
+    required this.today,
+    required this.upcoming,
+    required this.overdue,
+    required this.completed,
+  });
+
+  final List<api.TaskModel> today;
+  final List<api.TaskModel> upcoming;
+  final List<api.TaskModel> overdue;
+  final List<api.TaskModel> completed;
+
+  static const empty = TaskBucketSet(
+    today: [],
+    upcoming: [],
+    overdue: [],
+    completed: [],
+  );
 }
 
-/// Today tasks — dùng cho widget embedded cần tối ưu payload.
-final myTodayTasksProvider =
-    FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
-  return ref.read(taskRepoProvider).getTodayTasks();
+final myTasksProvider =
+    FutureProvider.autoDispose<TaskBucketSet>((ref) async {
+  // Gọi parallel 4 endpoint để mỗi bucket khớp 1-1 với API.
+  final results = await Future.wait([
+    ref.watch(todayTasksApiProvider.future),
+    ref.watch(upcomingTasksApiProvider.future),
+    ref.watch(overdueTasksApiProvider.future),
+    ref.watch(completedTasksApiProvider.future),
+  ]);
+
+  return TaskBucketSet(
+    today: results[0].where((t) => t.status != api.TaskStatus.cancelled).toList(),
+    upcoming:
+        results[1].where((t) => t.status != api.TaskStatus.cancelled).toList(),
+    overdue:
+        results[2].where((t) => t.status != api.TaskStatus.cancelled).toList(),
+    completed: results[3]
+        .where((t) => t.status != api.TaskStatus.cancelled)
+        .toList(),
+  );
 });
 
-/// Overdue tasks — dùng để render badge/cảnh báo.
-final myOverdueTasksProvider =
+/// Flatten all 4 buckets thành 1 list (cho các nơi cần tất cả task,
+/// ví dụ dashboard summary). Sort theo dueDate tăng dần.
+final myTasksFlatProvider =
     FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
-  return ref.read(taskRepoProvider).getOverdueTasks();
-});
-
-/// Upcoming (7 ngày tới).
-final myUpcomingTasksProvider =
-    FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
-  return ref.read(taskRepoProvider).getUpcomingTasks(days: 7);
+  final set = await ref.watch(myTasksProvider.future);
+  final seen = <String>{};
+  final merged = <api.TaskModel>[];
+  for (final t in [
+    ...set.overdue,
+    ...set.today,
+    ...set.upcoming,
+    ...set.completed,
+  ]) {
+    if (seen.add(t.id)) merged.add(t);
+  }
+  merged.sort((a, b) => a.dueDate.compareTo(b.dueDate));
+  return merged;
 });

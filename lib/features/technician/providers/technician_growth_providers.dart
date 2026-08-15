@@ -1,20 +1,21 @@
-import 'package:flutter/material.dart';
+library;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../../shared/widgets/growth_log_view.dart';
 import '../../tasks/providers/measurement_batch_providers.dart';
 import '../../tasks/providers/measurement_definition_provider.dart';
 import '../../tasks/providers/measurement_record_providers.dart';
-import '../../tasks/providers/my_tasks_provider.dart';
+import 'technician_my_tasks_provider.dart';
 
 /// State: `batchCode` được chọn để xem growth log. '' = tất cả batches.
-final selectedGrowthBatchIdProvider = StateProvider<String>((ref) => '');
+final selectedTechnicianGrowthBatchIdProvider =
+    StateProvider<String>((ref) => '');
 
-/// Danh sách batchId mà student có task (Observation / Measurement) phụ trách.
-final _studentBatchesFromTasksProvider =
+/// Danh sách batchId mà technician có task phụ trách.
+final _technicianBatchesFromTasksProvider =
     FutureProvider.autoDispose<List<String>>((ref) async {
-  final tasksAsync = ref.watch(myTasksFlatProvider);
+  final tasksAsync = ref.watch(technicianMyTasksFlatProvider);
   return tasksAsync.maybeWhen(
     data: (tasks) {
       final ids = <String>{};
@@ -28,9 +29,9 @@ final _studentBatchesFromTasksProvider =
 });
 
 /// Set các `batchId` xuất hiện trong growth records (dùng cho lazy fetch).
-final _batchIdsInGrowthRecordsProvider =
+final _technicianBatchIdsInRecordsProvider =
     Provider.autoDispose<Set<String>>((ref) {
-  final records = ref.watch(growthRecordsProvider);
+  final records = ref.watch(technicianGrowthRecordsProvider);
   return records.maybeWhen(
     data: (list) =>
         list.map((r) => r.batchId).where((id) => id.isNotEmpty).toSet(),
@@ -38,20 +39,13 @@ final _batchIdsInGrowthRecordsProvider =
   );
 });
 
-/// Map `batchId → batchCode` để hiển thị tên batch thay vì UUID khi backend
-/// không populate `batchCode` trong MeasurementRecordModel.
-///
-/// Nguồn (theo thứ tự ưu tiên):
-/// 1. `myTasksFlatProvider` (task có populate `batchCode`).
-/// 2. Lazy fetch `batchInfoProvider(batchId)` → `/batches/{id}` cho các
-///    `batchId` xuất hiện trong records mà chưa có trong (1).
-///
-/// Trả về `AsyncValue<Map>` để UI biết khi nào đang fetch.
-final batchCodeByBatchIdProvider =
+/// Map `batchId → batchCode` cho Technician. Lazy fetch từ `/batches/{id}`
+/// khi backend không populate `batchCode` trong MeasurementRecordModel.
+final technicianBatchCodeByBatchIdProvider =
     FutureProvider.autoDispose<Map<String, String>>((ref) async {
-  // 1. Từ task list (sync).
+  // 1. Từ technician task list (sync).
   final fromTasks = <String, String>{};
-  final tasksAsync = ref.watch(myTasksFlatProvider);
+  final tasksAsync = ref.watch(technicianMyTasksFlatProvider);
   tasksAsync.maybeWhen(
     data: (tasks) {
       for (final t in tasks) {
@@ -65,29 +59,33 @@ final batchCodeByBatchIdProvider =
   );
 
   // 2. Lazy fetch các batchId chưa có từ task list.
-  final pendingIds = ref.watch(_batchIdsInGrowthRecordsProvider).toList()
-    ..removeWhere(fromTasks.containsKey);
+  final pendingIds =
+      ref.watch(_technicianBatchIdsInRecordsProvider).toList()
+        ..removeWhere(fromTasks.containsKey);
   final fromApi = <String, String>{};
   await Future.wait(pendingIds.map((id) async {
     try {
       final info = await ref.read(batchInfoProvider(id).future);
-      if (info != null && info.batchCode != null && info.batchCode!.isNotEmpty) {
+      if (info != null &&
+          info.batchCode != null &&
+          info.batchCode!.isNotEmpty) {
         fromApi[id] = info.batchCode!;
       }
     } catch (_) {
-      // ignore: giữ nguyên UUID fallback
+      // ignore: giữ UUID fallback
     }
   }));
 
   return {...fromTasks, ...fromApi};
 });
 
-/// Tất cả records của student (mọi batch user phụ trách).
-final growthRecordsProvider =
+/// Tất cả records của Technician (mọi batch user phụ trách).
+final technicianGrowthRecordsProvider =
     FutureProvider.autoDispose<List<MeasurementRecordModel>>((ref) async {
   final repo = ref.read(measurementRecordRepositoryProvider);
 
-  final batchIds = await ref.watch(_studentBatchesFromTasksProvider.future);
+  final batchIds =
+      await ref.watch(_technicianBatchesFromTasksProvider.future);
   if (batchIds.isEmpty) return const [];
 
   final responses = await Future.wait(
@@ -111,12 +109,12 @@ final growthRecordsProvider =
 });
 
 /// Records đã filter theo batchCode.
-final effectiveGrowthRecordsProvider =
+final effectiveTechnicianGrowthRecordsProvider =
     Provider<AsyncValue<List<MeasurementRecordModel>>>((ref) {
-  final recordsAsync = ref.watch(growthRecordsProvider);
-  final batchCode = ref.watch(selectedGrowthBatchIdProvider);
+  final recordsAsync = ref.watch(technicianGrowthRecordsProvider);
+  final batchCode = ref.watch(selectedTechnicianGrowthBatchIdProvider);
   if (batchCode.isEmpty) return recordsAsync;
-  final batchMapAsync = ref.watch(batchCodeByBatchIdProvider);
+  final batchMapAsync = ref.watch(technicianBatchCodeByBatchIdProvider);
   final batchMap = batchMapAsync.maybeWhen(
     data: (m) => m,
     orElse: () => <String, String>{},
@@ -132,9 +130,9 @@ final effectiveGrowthRecordsProvider =
 });
 
 /// Danh sách batch codes duy nhất từ records.
-final availableBatchCodesProvider = Provider<List<String>>((ref) {
-  final records = ref.watch(growthRecordsProvider);
-  final batchMapAsync = ref.watch(batchCodeByBatchIdProvider);
+final availableTechnicianBatchCodesProvider = Provider<List<String>>((ref) {
+  final records = ref.watch(technicianGrowthRecordsProvider);
+  final batchMapAsync = ref.watch(technicianBatchCodeByBatchIdProvider);
   final knownMap = batchMapAsync.maybeWhen(
     data: (m) => m,
     orElse: () => <String, String>{},
@@ -159,29 +157,29 @@ final availableBatchCodesProvider = Provider<List<String>>((ref) {
 });
 
 /// Chart data: height theo ngày.
-final heightChartSpotsProvider = Provider<List<FlSpot>>((ref) {
-  final records = ref.watch(effectiveGrowthRecordsProvider);
+final technicianHeightChartSpotsProvider = Provider<List<FlSpot>>((ref) {
+  final records = ref.watch(effectiveTechnicianGrowthRecordsProvider);
   return records.when(
-    data: (list) => _buildSpots(list, 'height'),
+    data: (list) => _buildGrowthSpots(list, 'height'),
     loading: () => [],
     error: (_, __) => [],
   );
 });
 
 /// Chart data: leafCount theo ngày.
-final leafCountChartSpotsProvider = Provider<List<FlSpot>>((ref) {
-  final records = ref.watch(effectiveGrowthRecordsProvider);
+final technicianLeafCountChartSpotsProvider = Provider<List<FlSpot>>((ref) {
+  final records = ref.watch(effectiveTechnicianGrowthRecordsProvider);
   return records.when(
-    data: (list) => _buildSpots(list, 'leafCount'),
+    data: (list) => _buildGrowthSpots(list, 'leafCount'),
     loading: () => [],
     error: (_, __) => [],
   );
 });
 
 /// Tập `experimentId` xuất hiện trong records.
-final _experimentIdsInRecordsProvider =
+final _technicianExperimentIdsInRecordsProvider =
     Provider.autoDispose<Set<String>>((ref) {
-  final records = ref.watch(effectiveGrowthRecordsProvider);
+  final records = ref.watch(effectiveTechnicianGrowthRecordsProvider);
   return records.maybeWhen(
     data: (list) =>
         list.map((r) => r.experimentId).where((id) => id.isNotEmpty).toSet(),
@@ -190,9 +188,9 @@ final _experimentIdsInRecordsProvider =
 });
 
 /// Map `definitionId → MeasurementDefinitionInfo`.
-final growthDefinitionsProvider =
+final technicianGrowthDefinitionsProvider =
     Provider<Map<String, MeasurementDefinitionInfo>?>((ref) {
-  final ids = ref.watch(_experimentIdsInRecordsProvider);
+  final ids = ref.watch(_technicianExperimentIdsInRecordsProvider);
   if (ids.isEmpty) return const {};
   final merged = <String, MeasurementDefinitionInfo>{};
   bool anyLoading = false;
@@ -207,9 +205,9 @@ final growthDefinitionsProvider =
   return anyLoading && merged.isEmpty ? null : merged;
 });
 
-/// Cờ: student đã ghi nhận hôm nay.
-final hasTodayRecordProvider = Provider<bool>((ref) {
-  final records = ref.watch(growthRecordsProvider);
+/// Cờ: technician đã ghi nhận hôm nay.
+final technicianHasTodayRecordProvider = Provider<bool>((ref) {
+  final records = ref.watch(technicianGrowthRecordsProvider);
   return records.when(
     data: (list) {
       final today = DateTime.now();
@@ -225,7 +223,7 @@ final hasTodayRecordProvider = Provider<bool>((ref) {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-List<FlSpot> _buildSpots(
+List<FlSpot> _buildGrowthSpots(
     List<MeasurementRecordModel> records, String metric) {
   final byDate = <String, List<double>>{};
   for (final r in records) {
@@ -248,83 +246,4 @@ List<FlSpot> _buildSpots(
         : vals.reduce((double a, double b) => a + b) / vals.length;
     return FlSpot(dayNum.toDouble(), avg);
   }).toList();
-}
-
-// ─── Screen ─────────────────────────────────────────────────────────────────
-
-class GrowthLogScreen extends ConsumerWidget {
-  const GrowthLogScreen({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Bọc AsyncValue từ providers → unwrap để truyền vào shared view.
-    final recordsAsync = ref.watch(effectiveGrowthRecordsProvider);
-    final batchCodes = ref.watch(availableBatchCodesProvider);
-    final selectedBatch = ref.watch(selectedGrowthBatchIdProvider);
-    final batchMapAsync = ref.watch(batchCodeByBatchIdProvider);
-    final defMap = ref.watch(growthDefinitionsProvider);
-    final heightSpots = ref.watch(heightChartSpotsProvider);
-    final leafSpots = ref.watch(leafCountChartSpotsProvider);
-
-    // Loading state: hiển thị spinner full-screen cho cả 3 providers chính.
-    if (recordsAsync.isLoading ||
-        batchMapAsync.isLoading ||
-        defMap == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    // Error state.
-    if (recordsAsync.hasError) {
-      final tt = Theme.of(context).textTheme;
-      return Scaffold(
-        appBar: AppBar(title: const Text('Nhật ký tăng trưởng')),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline_rounded,
-                  size: 48, color: Colors.red),
-              const SizedBox(height: 8),
-              Text('Lỗi tải dữ liệu', style: tt.titleMedium),
-              const SizedBox(height: 4),
-              Text('${recordsAsync.error}', style: tt.bodySmall),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () {
-                  ref.invalidate(growthRecordsProvider);
-                  ref.invalidate(batchCodeByBatchIdProvider);
-                },
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Thử lại'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final records = recordsAsync.value ?? const <MeasurementRecordModel>[];
-    final batchMap = batchMapAsync.value ?? const <String, String>{};
-
-    return GrowthLogView(
-      records: records,
-      heightSpots: heightSpots,
-      leafCountSpots: leafSpots,
-      batchCodes: batchCodes,
-      selectedBatch: selectedBatch,
-      batchMap: batchMap,
-      isBatchMapLoading: batchMapAsync.isLoading,
-      defMap: defMap,
-      onBatchChanged: (code) {
-        ref.read(selectedGrowthBatchIdProvider.notifier).state =
-            code == selectedBatch ? '' : code;
-      },
-      onRefresh: () {
-        ref.invalidate(growthRecordsProvider);
-        ref.invalidate(batchCodeByBatchIdProvider);
-      },
-    );
-  }
 }
