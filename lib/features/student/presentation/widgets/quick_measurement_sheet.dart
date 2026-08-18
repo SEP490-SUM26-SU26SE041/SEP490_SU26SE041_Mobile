@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../../core/api/models/measurement_definition_model.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -31,9 +33,14 @@ class _QuickMeasurementSheet extends ConsumerStatefulWidget {
 class _QuickMeasurementSheetState
     extends ConsumerState<_QuickMeasurementSheet> {
   final Map<String, TextEditingController> _valueControllers = {};
+  final Map<String, String?> _selectedValues = {}; // For select/multiSelect
   final _noteController = TextEditingController();
   bool _isSubmitting = false;
   String? _activeError;
+
+  // Image capture
+  final List<File> _capturedImages = [];
+  final ImagePicker _imagePicker = ImagePicker();
 
   @override
   void dispose() {
@@ -182,6 +189,9 @@ class _QuickMeasurementSheetState
         children: [
           ...defs.map((d) => _buildField(d, tt, cs)),
           const SizedBox(height: AppSpacing.lg),
+          // Image capture section
+          _buildImageCaptureSection(tt, cs),
+          const SizedBox(height: AppSpacing.lg),
           Text('Ghi chú (tùy chọn)',
               style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
           const SizedBox(height: AppSpacing.sm),
@@ -244,6 +254,21 @@ class _QuickMeasurementSheetState
   Widget _buildField(
       MeasurementDefinitionModel d, TextTheme tt, ColorScheme cs) {
     final controller = _valueControllers[d.id]!;
+
+    switch (d.fieldType) {
+      case MeasurementFieldType.select:
+        return _buildSelectField(d, tt, cs);
+      case MeasurementFieldType.multiSelect:
+        return _buildMultiSelectField(d, tt, cs);
+      case MeasurementFieldType.text:
+        return _buildTextField(d, tt, cs);
+      case MeasurementFieldType.number:
+        return _buildNumberField(d, tt, cs, controller);
+    }
+  }
+
+  Widget _buildNumberField(
+      MeasurementDefinitionModel d, TextTheme tt, ColorScheme cs, TextEditingController controller) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: Column(
@@ -300,6 +325,352 @@ class _QuickMeasurementSheetState
     );
   }
 
+  Widget _buildTextField(
+      MeasurementDefinitionModel d, TextTheme tt, ColorScheme cs) {
+    final controller = _valueControllers[d.id]!;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(d.metricName,
+              style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
+          const SizedBox(height: AppSpacing.xs),
+          TextFormField(
+            controller: controller,
+            maxLines: 2,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: d.description ?? 'Nhập thông tin...',
+              filled: true,
+              fillColor: cs.surfaceContainerHighest.withAlpha(128),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectField(
+      MeasurementDefinitionModel d, TextTheme tt, ColorScheme cs) {
+    final selected = _selectedValues[d.id];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(d.metricName,
+              style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
+          if (d.description != null) ...[
+            const SizedBox(height: 2),
+            Text(d.description!,
+                style: tt.bodySmall?.copyWith(
+                  color: cs.onSurface.withAlpha(128),
+                )),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: d.options.map((opt) {
+              final isSelected = selected == opt.value;
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _selectedValues[d.id] = opt.value;
+                    _valueControllers[d.id]?.text = opt.label;
+                  });
+                },
+                child: Semantics(
+                  label: opt.label,
+                  selected: isSelected,
+                  button: true,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppColors.primary
+                          : cs.surfaceContainerHighest.withAlpha(128),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.primary
+                            : cs.outline.withAlpha(60),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Text(
+                      opt.label,
+                      style: tt.labelMedium?.copyWith(
+                        color: isSelected
+                            ? Colors.white
+                            : cs.onSurface,
+                        fontWeight:
+                            isSelected ? FontWeight.w600 : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMultiSelectField(
+      MeasurementDefinitionModel d, TextTheme tt, ColorScheme cs) {
+    final selectedSet = (_selectedValues[d.id] ?? '').split(',').where((e) => e.isNotEmpty).toSet();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(d.metricName,
+                  style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
+              const Spacer(),
+              Text(
+                '${selectedSet.length} đã chọn',
+                style: tt.bodySmall?.copyWith(color: AppColors.primary),
+              ),
+            ],
+          ),
+          if (d.description != null) ...[
+            const SizedBox(height: 2),
+            Text(d.description!,
+                style: tt.bodySmall?.copyWith(
+                  color: cs.onSurface.withAlpha(128),
+                )),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: d.options.map((opt) {
+              final isSelected = selectedSet.contains(opt.value);
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    final newSet = Set<String>.from(selectedSet);
+                    if (isSelected) {
+                      newSet.remove(opt.value);
+                    } else {
+                      newSet.add(opt.value);
+                    }
+                    _selectedValues[d.id] = newSet.join(',');
+                    _valueControllers[d.id]?.text = newSet.map((v) {
+                      return d.options.firstWhere(
+                        (o) => o.value == v,
+                        orElse: () => MeasurementOption(value: v, label: v),
+                      ).label;
+                    }).join(', ');
+                  });
+                },
+                child: Semantics(
+                  label: opt.label,
+                  selected: isSelected,
+                  button: true,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppColors.primary
+                          : cs.surfaceContainerHighest.withAlpha(128),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.primary
+                            : cs.outline.withAlpha(60),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isSelected) ...[
+                          const Icon(Icons.check, color: Colors.white, size: 16),
+                          const SizedBox(width: 4),
+                        ],
+                        Text(
+                          opt.label,
+                          style: tt.labelMedium?.copyWith(
+                            color: isSelected
+                                ? Colors.white
+                                : cs.onSurface,
+                            fontWeight:
+                                isSelected ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImageCaptureSection(TextTheme tt, ColorScheme cs) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('Hình ảnh',
+                style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
+            const SizedBox(width: AppSpacing.sm),
+            Text('(tùy chọn)',
+                style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(128))),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        SizedBox(
+          height: 100,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              // Add photo button
+              GestureDetector(
+                onTap: _captureImage,
+                child: Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHighest.withAlpha(128),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.primary.withAlpha(60),
+                      width: 1.5,
+                      style: BorderStyle.solid,
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_a_photo_rounded,
+                          color: AppColors.primary, size: 28),
+                      const SizedBox(height: 4),
+                      Text('Chụp ảnh',
+                          style: tt.labelSmall?.copyWith(
+                            color: AppColors.primary,
+                            fontSize: 11,
+                          )),
+                    ],
+                  ),
+                ),
+              ),
+              // Captured images
+              ..._capturedImages.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final file = entry.value;
+                return Padding(
+                  padding: const EdgeInsets.only(left: AppSpacing.sm),
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.file(
+                          file,
+                          width: 100,
+                          height: 100,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: GestureDetector(
+                          onTap: () => _removeImage(idx),
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.close,
+                                color: Colors.white, size: 14),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _captureImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_rounded),
+              title: const Text('Chụp ảnh'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Chọn từ thư viện'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return;
+
+    try {
+      final XFile? picked = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 80,
+        maxWidth: 1200,
+      );
+      if (picked != null) {
+        setState(() {
+          _capturedImages.add(File(picked.path));
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Không thể chụp ảnh: $e')),
+        );
+      }
+    }
+  }
+
+  void _removeImage(int index) {
+    setState(() {
+      _capturedImages.removeAt(index);
+    });
+  }
+
   Widget? _statusIcon(ValueStatus status) {
     switch (status) {
       case ValueStatus.exceeded:
@@ -336,15 +707,55 @@ class _QuickMeasurementSheetState
     final resultData = <String, String>{};
     String? firstErr;
     for (final d in defs) {
-      final c = _valueControllers[d.id];
-      final v = c?.text.trim() ?? '';
-      if (v.isEmpty) continue;
-      final err = localValidateValue(d, v);
-      if (err != null) {
-        firstErr ??= err;
-        continue;
+      String v;
+
+      // Handle different field types
+      if (d.isChoiceField) {
+        // For select/multiSelect: use the raw value from _selectedValues
+        v = _selectedValues[d.id] ?? '';
+      } else {
+        // For number/text: use the text controller
+        v = _valueControllers[d.id]?.text.trim() ?? '';
       }
+
+      if (v.isEmpty) continue;
+
+      // Validate number fields only
+      if (d.fieldType == MeasurementFieldType.number) {
+        final err = localValidateValue(d, v);
+        if (err != null) {
+          firstErr ??= err;
+          continue;
+        }
+      }
+
       resultData['def_${d.id}'] = v;
+    }
+
+    // Build image params from captured files
+    final imageParams = _capturedImages.map((f) => TaskReportImageParam(
+      file: f,
+      uploadedAt: DateTime.now(),
+    )).toList();
+
+    // Validate: check if all required fields are filled
+    final unfilledRequired = defs.where((d) {
+      String value;
+      if (d.isChoiceField) {
+        value = _selectedValues[d.id] ?? '';
+      } else {
+        value = _valueControllers[d.id]?.text.trim() ?? '';
+      }
+      return value.isEmpty; // Required field is empty
+    }).toList();
+
+    if (unfilledRequired.isNotEmpty) {
+      final names = unfilledRequired.map((d) => d.metricName).join(', ');
+      setState(() {
+        _activeError = 'Vui lòng nhập đầy đủ: $names';
+        _isSubmitting = false;
+      });
+      return;
     }
 
     if (resultData.isEmpty) {
@@ -377,7 +788,7 @@ class _QuickMeasurementSheetState
             ? 'Đã ghi nhận ${bridge.bulk?.items.length ?? 0} chỉ số. $note'
             : 'Đã ghi nhận ${bridge.bulk?.items.length ?? 0} chỉ số.',
         resultData: resultData,
-        images: const [],
+        images: imageParams,
         experimentId: task.experimentId.isEmpty ? null : task.experimentId,
         batchId: task.batchId,
         effectiveDefinitions: defs,

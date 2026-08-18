@@ -33,7 +33,7 @@ import 'package:flutter_application_2/core/theme/app_animation.dart';
 import 'package:flutter_application_2/shared/models/user_model.dart';
 
 String _initialRouteForRole(UserRole role) => switch (role) {
-  UserRole.researcher => '/dashboard',
+  UserRole.researcher => '/student/dashboard', // Researcher disabled temporarily
   UserRole.student   => '/student/dashboard',
   UserRole.technician => '/tech/dashboard',
 };

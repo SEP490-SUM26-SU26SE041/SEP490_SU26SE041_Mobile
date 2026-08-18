@@ -7,6 +7,7 @@ import '../data/task_report_constants.dart';
 
 /// Hook: Fetch batch (groupId) từ batchId, dùng để filter measurement
 /// definitions theo nhóm (xem [filterDefinitionsByTaskGroup]).
+/// Sử dụng cache để tránh gọi lại nhiều lần trong cùng session.
 final batchInfoProvider = FutureProvider.autoDispose.family<
     BatchGroupInfoWithCode?, String>((ref, batchId) async {
   if (batchId.isEmpty) return null;
@@ -23,26 +24,19 @@ final batchInfoProvider = FutureProvider.autoDispose.family<
 /// Trả về các definitions đã được filter theo groupId của task.
 ///
 /// Ưu tiên:
-///   1. Fetch `experimentGroupId` qua `GET /batches/{batchId}`.
-///   2. Fallback: dedupe theo `metricName`.
+///   1. Dùng `taskBatchGroupId` đã có sẵn
+///   2. Fallback: dedupe theo `metricName` nếu có nhiều group
 final effectiveMeasurementDefinitionsProvider =
     FutureProvider.autoDispose.family<List<MeasurementDefinitionModel>,
         EffectiveDefinitionsParam>((ref, params) async {
   final defs = params.definitions;
   if (defs.isEmpty) return const [];
 
-  // Try fetching batch to get definitive groupId.
-  String? groupId = params.taskBatchGroupId;
-  if (groupId == null && params.batchId != null && params.batchId!.isNotEmpty) {
-    final batch = await ref.read(batchInfoProvider(params.batchId!).future);
-    if (batch != null) groupId = batch.groupId;
-  }
-
   final ctx = TaskGroupContext(
     experimentId: params.experimentId,
     experimentStageId: null,
     batchId: params.batchId,
-    batchGroupId: groupId,
+    batchGroupId: params.taskBatchGroupId,
   );
   return filterDefinitionsByTaskGroup(
     defs,

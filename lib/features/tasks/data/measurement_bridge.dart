@@ -1,5 +1,6 @@
 library;
 
+import 'package:flutter/foundation.dart';
 import '../../../core/api/models/measurement_definition_model.dart';
 import '../../../core/api/models/task_model.dart' as api;
 import 'task_report_constants.dart';
@@ -57,7 +58,7 @@ enum BridgeMode { bulk, legacy, skipped, error }
 ///   2. `task.batch.groupId` (BE populate).
 ///   3. `task.batchGroupId` (flat).
 ///   4. `task.groupId` (flat).
-///   5. Fallback: dedupe theo `metricName` (lấy bản ghi đầu tiên).
+///   5. Fallback: KHÔNG filter — trả về tất cả definitions.
 List<MeasurementDefinitionModel> filterDefinitionsByTaskGroup(
   List<MeasurementDefinitionModel> definitions,
   TaskGroupContext task, {
@@ -66,12 +67,21 @@ List<MeasurementDefinitionModel> filterDefinitionsByTaskGroup(
   if (definitions.isEmpty) return const [];
 
   final taskGroupId = explicitGroupId ?? task.batchGroupId;
+  
+  // Nếu có groupId cụ thể, thử lọc theo group đó
   if (taskGroupId != null && taskGroupId.isNotEmpty) {
     final same = definitions.where((d) => d.groupId == taskGroupId).toList();
-    if (same.isNotEmpty) return same;
+    if (same.isNotEmpty) {
+      debugPrint('[DEBUG] Filter: Found ${same.length} definitions for groupId=$taskGroupId');
+      return same;
+    }
+    debugPrint('[DEBUG] Filter: No definitions match groupId=$taskGroupId, returning all ${definitions.length}');
+    // Fallback: trả về tất cả thay vì dedupe
+    return definitions;
   }
 
-  // Fallback: dedupe theo metricName (giữ bản ghi đầu tiên).
+  // Không có groupId constraint, trả về tất cả (dedupe để tránh trùng metricName)
+  debugPrint('[DEBUG] Filter: No groupId constraint, returning all ${definitions.length} definitions');
   final seen = <String>{};
   final dedup = <MeasurementDefinitionModel>[];
   for (final d in definitions) {
@@ -372,9 +382,17 @@ BridgeOutput buildBridgeOutput({
   required List<MeasurementDefinitionModel> effectiveDefinitions,
   required BridgeExtraMeta meta,
 }) {
+  debugPrint('[BRIDGE] buildBridgeOutput called');
+  debugPrint('[BRIDGE] - resultData keys: ${resultData.keys.join(", ")}');
+  debugPrint('[BRIDGE] - effectiveDefinitions count: ${effectiveDefinitions.length}');
+  for (final d in effectiveDefinitions) {
+    debugPrint('[BRIDGE]   def: ${d.id} (${d.metricName})');
+  }
+  
   final reasons = <String>[];
 
   if (task.experimentId == null || task.experimentId!.isEmpty) {
+    debugPrint('[BRIDGE] FAIL: Missing experimentId');
     return BridgeOutput(
       path: BridgePath.none,
       skippedReasons: const ['Thiếu experimentId'],
@@ -393,15 +411,24 @@ BridgeOutput buildBridgeOutput({
     filtered[k] = s;
   });
 
+  debugPrint('[BRIDGE] Filtered resultData: ${filtered.keys.join(", ")}');
+
   if (filtered.isEmpty) {
+    debugPrint('[BRIDGE] FAIL: filtered.isEmpty');
     return BridgeOutput(path: BridgePath.none);
   }
 
   final path = decideBridgePath(task.taskType ?? api.TaskType.other);
+  debugPrint('[BRIDGE] Path decision: $path');
 
   if (path == BridgePath.bulk) {
     final items = extractBulkItemsFromResultData(filtered, effectiveDefinitions);
+    debugPrint('[BRIDGE] Bulk items extracted: ${items.length}');
+    for (final item in items) {
+      debugPrint('[BRIDGE]   - ${item.definitionId} = ${item.value} (${item.metricName})');
+    }
     if (items.isEmpty) {
+      debugPrint('[BRIDGE] FAIL: No bulk items, falling back to legacy');
       return BridgeOutput(
         path: BridgePath.legacy,
         skippedReasons: ['Không có def_<uuid> nào — bulk path bị bỏ'],
@@ -412,6 +439,7 @@ BridgeOutput buildBridgeOutput({
       items: items,
       meta: meta,
     );
+    debugPrint('[BRIDGE] SUCCESS: Bulk payload built with ${bulk.items.length} items');
     return BridgeOutput(path: BridgePath.bulk, bulk: bulk, skippedReasons: reasons);
   }
 
@@ -437,6 +465,7 @@ BridgeOutput buildBridgeOutput({
 // ─── Local validation ──────────────────────────────────────────────────────
 
 /// Validation local cho 1 dynamic field. Trả `null` nếu OK.
+/// Dùng minValue/maxValue nếu có, fallback sang legacy logic.
 String? localValidateValue(
   MeasurementDefinitionModel? definition,
   String? raw,
@@ -450,6 +479,17 @@ String? localValidateValue(
   final name = (definition?.metricName ?? '').toLowerCase();
   final target = definition?.targetValue ?? double.nan;
 
+  // Ưu tiên dùng minValue/maxValue nếu có
+  final minVal = definition?.minValue;
+  final maxVal = definition?.maxValue;
+  if (minVal != null && num < minVal) {
+    return '${definition?.metricName} phải >= $minVal';
+  }
+  if (maxVal != null && num > maxVal) {
+    return '${definition?.metricName} phải <= $maxVal';
+  }
+
+  // Fallback legacy logic
   if (unit == '%' && num > 100) {
     return '${definition?.metricName} là phần trăm nên phải nằm trong [0, 100].';
   }

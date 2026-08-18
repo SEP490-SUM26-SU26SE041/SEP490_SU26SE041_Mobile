@@ -49,6 +49,10 @@ Map<String, String> _buildLabelMap() {
     'pestDiseaseLevel': 'Mức độ sâu bệnh',
     'inspectionChecklist': 'Checklist tuân thủ',
     'qualityGrade': 'Phân loại chất lượng',
+    'leafColor': 'Màu lá',
+    'irrigationMethod': 'Phương pháp tưới',
+    'duration': 'Thời gian (phút)',
+    'waterAmount': 'Lượng nước (L)',
   };
   customs.forEach((k, v) {
     map[k] = v;

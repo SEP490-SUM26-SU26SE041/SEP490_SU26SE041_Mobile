@@ -98,7 +98,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         if (!mounted) return;
         final role = authState.user.role;
         final dashboard = switch (role) {
-          UserRole.researcher => '/dashboard',
+          // Researcher disabled temporarily - redirect to student
+          UserRole.researcher => '/student/dashboard',
           UserRole.student => '/student/dashboard',
           UserRole.technician => '/tech/dashboard',
         };

@@ -5,6 +5,7 @@ import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/utils/date_utils.dart';
 import '../../../../shared/models/growth_task_model.dart';
 import '../../../../shared/widgets/snms_card.dart';
+import '../../../../shared/utils/report_field_labels.dart';
 import '../../../tasks/data/metric_catalog.dart';
 import '../../../tasks/providers/measurement_definition_provider.dart';
 import '../../../tasks/providers/task_providers.dart';
@@ -65,7 +66,7 @@ class _TaskReportViewSheetState extends ConsumerState<_TaskReportViewSheet> {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  Text('Lịch sử báo cáo',
+                  Text('Báo cáo',
                       style: tt.titleLarge
                           ?.copyWith(fontWeight: FontWeight.w700)),
                   const Spacer(),
@@ -308,14 +309,21 @@ class _ReportContent extends ConsumerWidget {
               orElse: () => null,
             );
 
-    // Load task images để hiển thị trong report view.
-    final imagesAsync = ref.watch(taskImagesByTaskProvider(taskId));
-    final reportImages = imagesAsync.maybeWhen(
-      data: (list) => list
-          .where((img) => img.reportId == report.id && img.imageUrl.isNotEmpty)
-          .toList(),
-      orElse: () => <TaskImageModel>[],
-    );
+    // Ưu tiên images từ report model (BE embed); fallback qua task images provider.
+    List<TaskImageModel> reportImages;
+    if (report.images.isNotEmpty) {
+      reportImages = report.images
+          .where((img) => img.imageUrl.isNotEmpty)
+          .toList();
+    } else {
+      final imagesAsync = ref.watch(taskImagesByTaskProvider(taskId));
+      reportImages = imagesAsync.maybeWhen(
+        data: (list) => list
+            .where((img) => img.reportId == report.id && img.imageUrl.isNotEmpty)
+            .toList(),
+        orElse: () => <TaskImageModel>[],
+      );
+    }
 
     return SNMSCard(
       child: Column(
@@ -332,23 +340,13 @@ class _ReportContent extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest.withAlpha(77),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(report.description, style: tt.bodyMedium),
+          _DescriptionSection(
+            description: report.description,
+            rawResultData: rd,
+            defMap: defMap,
+            tt: tt,
+            cs: cs,
           ),
-          if (rd != null) ...[
-            const SizedBox(height: AppSpacing.lg),
-            Text('Chi tiết kết quả',
-                style: tt.labelMedium
-                    ?.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(height: AppSpacing.sm),
-            ..._buildResultRows(rd, defMap, tt, cs),
-          ],
           if (reportImages.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.lg),
             _ImagesSection(images: reportImages, tt: tt, cs: cs),
@@ -357,12 +355,95 @@ class _ReportContent extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _DescriptionSection extends StatelessWidget {
+  const _DescriptionSection({
+    required this.description,
+    required this.rawResultData,
+    required this.defMap,
+    required this.tt,
+    required this.cs,
+  });
+  final String description;
+  final Map<String, dynamic>? rawResultData;
+  final Map<String, MeasurementDefinitionInfo>? defMap;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildDescription(),
+        if (rawResultData != null && rawResultData!.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.lg),
+          Text('Chi tiết kết quả',
+              style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: AppSpacing.sm),
+          ..._buildResultRows(rawResultData!, defMap),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDescription() {
+    final parsed = _parseKeyValueDescription(description);
+    if (parsed != null && parsed.isNotEmpty) {
+      final chips = <Widget>[];
+      parsed.forEach((key, value) {
+        if (value.isEmpty) return;
+        final label = labelForReportKey(key);
+        chips.add(_ResultChip(label: label, value: value, tt: tt, cs: cs));
+        chips.add(const SizedBox(height: AppSpacing.xs));
+      });
+      // Nếu parse được nhưng không có chip nào (tất cả value rỗng) → plain text.
+      if (chips.isEmpty) {
+        return _plainDescription(description);
+      }
+      return Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: chips,
+      );
+    }
+    return _plainDescription(description);
+  }
+
+  Widget _plainDescription(String text) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withAlpha(77),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text, style: tt.bodyMedium),
+    );
+  }
+
+  Map<String, String>? _parseKeyValueDescription(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || !trimmed.contains('=')) return null;
+    final parts = trimmed.split(RegExp(r',\s*'));
+    final result = <String, String>{};
+    int matchedCount = 0;
+    for (final part in parts) {
+      final eqIdx = part.indexOf('=');
+      if (eqIdx <= 0) continue;
+      final key = part.substring(0, eqIdx).trim();
+      final value = part.substring(eqIdx + 1).trim();
+      if (key.isEmpty || value.isEmpty) continue;
+      result[key] = value;
+      matchedCount++;
+    }
+    return matchedCount >= 2 ? result : null;
+  }
 
   List<Widget> _buildResultRows(
     Map<String, dynamic> rd,
     Map<String, MeasurementDefinitionInfo>? defMap,
-    TextTheme tt,
-    ColorScheme cs,
   ) {
     final rows = <Widget>[];
     String? v(String k) {
@@ -372,27 +453,33 @@ class _ReportContent extends ConsumerWidget {
       return s.isEmpty ? null : s;
     }
 
-    void add(String label, String? value) {
+    void add(String key) {
+      final label = labelForReportKey(key);
+      final value = v(key);
       if (value == null || value.isEmpty) return;
-      rows.add(_Row(label: label, value: value, tt: tt, cs: cs));
+      rows.add(_ResultChip(label: label, value: value, tt: tt, cs: cs));
       rows.add(const SizedBox(height: AppSpacing.xs));
     }
 
-    add('Số cây đã xử lý',
-        v('plantsWatered') ?? v('fertilizedPlantCount') ?? v('plantCount'));
-    add('Lượng nước / phân bón', v('waterAmount') ?? v('fertilizerAmount'));
-    add('Tình trạng', v('condition') ?? v('healthStatus'));
-    add('Số cây héo', v('plantsWilting'));
-    add('Hành động', v('action'));
-    add('Sản lượng thu hoạch', v('plantsHarvested'));
-    add('Khối lượng thu hoạch', v('harvestWeight'));
-    add('Chiều cao cây', v('plantHeight') ?? v('chieuCaoCm'));
-    add('Số lá', v('leafCount') ?? v('soLaTrungBinh'));
-    add('Màu sắc lá', v('leafColor'));
-    add('Độ ẩm đất', v('soilMoistureAfter'));
-    add('Thiết bị kiểm tra', v('inspectedDevices'));
+    add('plantCount');
+    add('plantsWatered');
+    add('fertilizedPlantCount');
+    add('waterAmount');
+    add('fertilizerAmount');
+    add('condition');
+    add('healthStatus');
+    add('plantsWilting');
+    add('action');
+    add('plantsHarvested');
+    add('harvestWeight');
+    add('plantHeight');
+    add('chieuCaoCm');
+    add('leafCount');
+    add('soLaTrungBinh');
+    add('leafColor');
+    add('soilMoistureAfter');
+    add('inspectedDevices');
 
-    // Map metric name + unit cho các keys dạng `def_<uuid>` / `custom_<name>`.
     if (rd.isNotEmpty) {
       rd.forEach((k, val) {
         if (k.startsWith('def_') || k.startsWith('custom_')) {
@@ -401,16 +488,13 @@ class _ReportContent extends ConsumerWidget {
 
           String label;
           if (k.startsWith('custom_')) {
-            // custom_<fieldName> → dùng trực tiếp fieldName
             final fieldName = k.substring('custom_'.length);
             label = 'Tùy chỉnh: $fieldName';
           } else {
-            // def_<uuid> → tìm trong definition map
             final definitionId = k.substring('def_'.length);
             final info = defMap?[definitionId];
             if (info != null && info.metricName.isNotEmpty) {
               final unit = info.unit;
-              // Map sang label VN qua catalog; fallback dùng metricName thô.
               final display = MetricCatalog.lookup(info.metricName);
               if (display != null) {
                 label = unit != null && unit.isNotEmpty
@@ -422,17 +506,16 @@ class _ReportContent extends ConsumerWidget {
                     : info.metricName;
               }
             } else {
-              // Không resolve được từ API: detect theo value để gợi ý.
               final guessed = _guessMetricFromValue(s);
               if (guessed != null) {
                 label = guessed.label;
               } else {
-                // Fallback cuối: UUID ngắn gọn (8 ký tự đầu).
                 label = 'Chỉ số (${_shortId(definitionId)})';
               }
             }
           }
-          add(label, s);
+          rows.add(_ResultChip(label: label, value: s, tt: tt, cs: cs));
+          rows.add(const SizedBox(height: AppSpacing.xs));
         }
       });
     }
@@ -462,23 +545,14 @@ class _ReportContent extends ConsumerWidget {
     return rows;
   }
 
-  /// Rút gọn UUID cho dễ đọc: `def_73a1c433-...` → `73a1c433`.
-  static String _shortId(String id) {
+  String _shortId(String id) {
     if (id.length <= 8) return id;
     return id.substring(0, 8);
   }
 
-  /// Gợi ý metric dựa trên giá trị đo (khi không có definition trong cache).
-  /// Quy tắc:
-  /// - Có "cm" trong value → Chiều cao
-  /// - Có "lá"/"la"/"leaf" → Số lá
-  /// - Có "%" → Phần trăm (tỷ lệ sống / đậu quả / độ ẩm)
-  /// - Có "kg"/"g" → Khối lượng
-  /// - Có "L"/"lít" → Lượng nước
-  static MetricDisplay? _guessMetricFromValue(String value) {
+  MetricDisplay? _guessMetricFromValue(String value) {
     final v = value.trim().toLowerCase();
     if (v.isEmpty) return null;
-    // Số kèm đơn vị → so sánh exact unit.
     if (RegExp(r'\bcm\b|centimeter|xentimet').hasMatch(v)) {
       return MetricCatalog.lookup('height');
     }
@@ -486,9 +560,7 @@ class _ReportContent extends ConsumerWidget {
       return MetricCatalog.lookup('leafCount');
     }
     if (RegExp(r'%').hasMatch(v)) {
-      // Có thể là tỷ lệ sống / đậu quả / độ ẩm đất. Trả chung "Chỉ số (%)".
-      return const MetricDisplay(
-          label: 'Chỉ số (%)', unit: '%', icon: 'percent');
+      return const MetricDisplay(label: 'Chỉ số (%)', unit: '%', icon: 'percent');
     }
     if (RegExp(r'\bkg\b|\btấn\b|\bton\b|\bg\b').hasMatch(v)) {
       return MetricCatalog.lookup('weight');
@@ -497,6 +569,58 @@ class _ReportContent extends ConsumerWidget {
       return MetricCatalog.lookup('waterAmount');
     }
     return null;
+  }
+}
+
+/// Chip hiển thị 1 cặp label=value với label tiếng Việt.
+class _ResultChip extends StatelessWidget {
+  const _ResultChip({
+    required this.label,
+    required this.value,
+    required this.tt,
+    required this.cs,
+  });
+  final String label;
+  final String value;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: cs.primaryContainer.withAlpha(51),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.primary.withAlpha(40)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              style: tt.labelSmall?.copyWith(
+                color: cs.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Flexible(
+            child: Text(
+              value,
+              style: tt.labelSmall?.copyWith(
+                color: cs.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -671,33 +795,3 @@ class _ImageTile extends StatelessWidget {
   }
 }
 
-class _Row extends StatelessWidget {
-  const _Row(
-      {required this.label,
-      required this.value,
-      required this.tt,
-      required this.cs});
-  final String label;
-  final String value;
-  final TextTheme tt;
-  final ColorScheme cs;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 140,
-          child: Text(label,
-              style: tt.bodySmall
-                  ?.copyWith(color: cs.onSurface.withAlpha(153))),
-        ),
-        Expanded(
-          child: Text(value,
-              style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
-        ),
-      ],
-    );
-  }
-}

@@ -16,6 +16,7 @@ class DashboardOverviewModel {
     this.recommendedActions = const [],
     this.topExperiments = const [],
     this.generatedAt,
+    this.recentImages = const [],
   });
 
   final int activeExperiments;
@@ -30,6 +31,9 @@ class DashboardOverviewModel {
   final List<DashboardRecommendation> recommendedActions;
   final List<DashboardExperimentSummary> topExperiments;
   final DateTime? generatedAt;
+
+  /// Ảnh cây gần đây từ task-reports — hiển thị trên dashboard.
+  final List<TaskImageItem> recentImages;
 
   factory DashboardOverviewModel.fromJson(Map<String, dynamic> json) {
     // Support both envelope {data: {...}} and direct object.
@@ -60,6 +64,12 @@ class DashboardOverviewModel {
               .toList() ??
           const [],
       generatedAt: parseApiDateTime(data['generatedAt']?.toString()),
+      recentImages: (data['recentImages'] as List?)
+              ?.whereType<Map>()
+              .map((e) => TaskImageItem.fromJson(
+                  Map<String, dynamic>.from(e)))
+              .toList() ??
+          const [],
     );
   }
 
@@ -73,6 +83,42 @@ class DashboardOverviewModel {
         totalMeasurementRecords: 0,
         criticalAlerts: 0,
       );
+}
+
+/// Ảnh task gần đây — hiển thị trên dashboard.
+class TaskImageItem {
+  const TaskImageItem({
+    required this.id,
+    required this.imageUrl,
+    required this.uploadedAt,
+    this.caption,
+    this.batchId,
+    this.batchCode,
+    this.taskId,
+    this.taskTitle,
+  });
+
+  final String id;
+  final String imageUrl;
+  final DateTime uploadedAt;
+  final String? caption;
+  final String? batchId;
+  final String? batchCode;
+  final String? taskId;
+  final String? taskTitle;
+
+  factory TaskImageItem.fromJson(Map<String, dynamic> json) {
+    return TaskImageItem(
+      id: json['id']?.toString() ?? '',
+      imageUrl: json['imageUrl'] as String? ?? json['url'] as String? ?? '',
+      uploadedAt: parseApiDateTimeOrNow(json['uploadedAt']?.toString() ?? json['capturedAt']?.toString()),
+      caption: json['caption'] as String?,
+      batchId: json['batchId'] as String?,
+      batchCode: json['batchCode'] as String?,
+      taskId: json['taskId'] as String?,
+      taskTitle: json['taskTitle'] as String?,
+    );
+  }
 }
 
 class DashboardRecommendation {

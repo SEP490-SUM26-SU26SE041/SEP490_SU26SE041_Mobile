@@ -98,13 +98,20 @@ class StudentDashboardScreen extends ConsumerWidget {
                       alertsAsync: alertsAsync,
                       unreadAsync: unreadAsync),
                   const SizedBox(height: AppSpacing.xl),
-                  const GradientHeader(
+                  GradientHeader(
                     title: 'Hình ảnh cây gần đây',
                     subtitle: 'Cập nhật từ Student & Technician',
-                    leading: Icon(Icons.eco_rounded, color: Colors.white, size: 18),
+                    leading: const Icon(Icons.eco_rounded, color: Colors.white, size: 18),
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  const PlantPhotoGallery(maxPhotos: 5),
+                  PlantPhotoGallery(
+                    images: overview.maybeWhen(
+                      data: (o) => o.recentImages,
+                      orElse: () => const [],
+                    ),
+                    maxPhotos: 5,
+                    onImageTap: (image) => _onImageTap(context, image),
+                  ),
                   const SizedBox(height: AppSpacing.xl),
                   _TodayTasksSection(context: context, today: myTasksAsync.maybeWhen(
                     data: (s) => s.today, orElse: () => const [])),
@@ -122,6 +129,12 @@ class StudentDashboardScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  void _onImageTap(BuildContext context, TaskImageItem image) {
+    if (image.taskId != null && image.taskId!.isNotEmpty) {
+      context.push('/tasks/${image.taskId}');
+    }
   }
 }
 

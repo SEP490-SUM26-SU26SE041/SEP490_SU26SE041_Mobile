@@ -8,6 +8,7 @@ import '../../../core/utils/date_utils.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../shared/widgets/snms_card.dart';
 import '../../../shared/models/growth_task_model.dart' as internal;
+import '../../../shared/utils/report_field_labels.dart';
 import '../../tasks/data/task_report_constants.dart';
 import '../../tasks/data/task_report_submit_service.dart';
 import '../../tasks/providers/task_providers.dart';
@@ -656,6 +657,60 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
     );
   }
 
+  /// Build chips từ description (parse key=value) hoặc plain text.
+  /// Keys đã có trong rawResultData được bỏ qua.
+  List<Widget> _buildDescriptionChips(
+    String description,
+    Map<String, dynamic>? rd,
+    TextTheme tt,
+    ColorScheme cs,
+  ) {
+    final parsed = _parseKeyValueDescription(description);
+    if (parsed != null && parsed.isNotEmpty) {
+      final chips = <Widget>[];
+      parsed.forEach((key, value) {
+        if (value.isEmpty) return;
+        if (rd != null && rd.containsKey(key)) return;
+        chips.add(Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.success.withAlpha(15),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '${labelForReportKey(key)}: $value',
+            style: tt.labelSmall?.copyWith(color: AppColors.success),
+          ),
+        ));
+        chips.add(const SizedBox(width: AppSpacing.xs));
+      });
+      return chips.isEmpty ? [Text(description, style: tt.bodyMedium)] : chips;
+    }
+    return [Text(description, style: tt.bodyMedium)];
+  }
+
+  /// Parse text dạng "key=value, key2=value2, ..." trả về Map.
+  Map<String, String>? _parseKeyValueDescription(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || !trimmed.contains('=')) return null;
+    final parts = trimmed.split(RegExp(r',\s*'));
+    final result = <String, String>{};
+    int matchedCount = 0;
+    for (final part in parts) {
+      final eqIdx = part.indexOf('=');
+      if (eqIdx <= 0) continue;
+      final key = part.substring(0, eqIdx).trim();
+      final value = part.substring(eqIdx + 1).trim();
+      if (key.isEmpty || value.isEmpty) continue;
+      result[key] = value;
+      matchedCount++;
+    }
+    return matchedCount >= 2 ? result : null;
+  }
+
   Widget _buildReportCard(internal.TaskReportModel r, TextTheme tt, ColorScheme cs) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -681,7 +736,7 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
             ),
             if (r.description.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.xs),
-              Text(r.description, style: tt.bodyMedium),
+              ..._buildDescriptionChips(r.description, r.rawResultData, tt, cs),
             ],
             if (r.rawResultData != null && r.rawResultData!.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.xs),
