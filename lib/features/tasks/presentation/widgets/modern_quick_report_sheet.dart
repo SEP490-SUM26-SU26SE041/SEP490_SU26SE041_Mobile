@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/api/models/measurement_definition_model.dart';
 import '../../../../core/api/models/task_model.dart' as api;
+import '../../../../core/constants/ai_providers.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/models/growth_task_model.dart' as internal;
@@ -12,7 +13,7 @@ import '../../../../shared/widgets/top_snackbar.dart';
 import '../../../tasks/data/measurement_bridge.dart';
 import '../../../tasks/data/task_report_constants.dart';
 import '../../../tasks/data/task_report_submit_service.dart';
-import '../../../tasks/presentation/widgets/task_image_picker.dart';
+import '../../../tasks/presentation/widgets/image_uploader.dart';
 import '../../../tasks/presentation/widgets/task_visual.dart';
 import '../../../tasks/providers/measurement_batch_providers.dart';
 import '../../../tasks/providers/measurement_record_providers.dart';
@@ -163,14 +164,19 @@ class _QuickReportSheetState extends ConsumerState<_QuickReportSheet>
   int _filledCount = 0;
 
   /// Ảnh đính kèm từ parent (đã chọn sẵn trước khi mở sheet).
-  late List<File> _selectedImages;
+  /// Mỗi ảnh có AI provider riêng.
+  late List<UploadImageItem> _uploadImages;
 
   late final List<_CustomField> _customFields;
 
   @override
   void initState() {
     super.initState();
-    _selectedImages = List<File>.from(widget.preloadedImages);
+    _uploadImages = widget.preloadedImages.map((f) => UploadImageItem(
+          file: f,
+          previewUrl: '',
+          aiProvider: AiProviders.defaultProvider,
+        )).toList();
     _customFields = [
       _CustomField(key: 'custom_1', label: 'Ghi chú thêm', value: ''),
     ];
@@ -300,10 +306,12 @@ class _QuickReportSheetState extends ConsumerState<_QuickReportSheet>
       taskId: widget.task.id,
       reportText: _composeReportText(resultData),
       resultData: resultData,
-      images: _selectedImages
-          .map((f) => TaskReportImageParam(
-                file: f,
+      images: _uploadImages
+          .map((img) => TaskReportImageParam(
+                file: img.file,
+                caption: img.caption,
                 uploadedAt: DateTime.now(),
+                aiProvider: img.aiProvider,
               ))
           .toList(),
       experimentId: widget.task.experimentId.isEmpty
@@ -335,7 +343,7 @@ class _QuickReportSheetState extends ConsumerState<_QuickReportSheet>
       ref.invalidate(todayTasksLocalProvider);
       ref.invalidate(overdueTasksLocalProvider);
       // Sync state images về parent.
-      widget.onImagesChanged?.call(List<File>.from(_selectedImages));
+      widget.onImagesChanged?.call(_uploadImages.map((i) => i.file).toList());
 
       Navigator.of(context).pop();
       _showOutcomeSnack(outcome);
@@ -781,12 +789,14 @@ class _QuickReportSheetState extends ConsumerState<_QuickReportSheet>
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
-        TaskImagePicker(
-          images: _selectedImages,
+        ImageUploader(
+          images: _uploadImages,
           onImagesChanged: (imgs) {
-            setState(() => _selectedImages = imgs);
+            setState(() => _uploadImages = imgs);
           },
-          isUploading: _isSubmitting,
+          disabled: _isSubmitting,
+          defaultAiProvider: AiProviders.defaultProvider,
+          enableAiScan: true,
         ),
       ],
     );

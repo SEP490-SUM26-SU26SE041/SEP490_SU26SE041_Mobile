@@ -6,13 +6,14 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/api/models/measurement_definition_model.dart';
 import '../../../../core/api/models/task_model.dart' as api;
+import '../../../../core/constants/ai_providers.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../shared/widgets/snms_card.dart';
 import '../../../../shared/widgets/top_snackbar.dart';
 import '../../../tasks/data/measurement_bridge.dart';
 import '../../../tasks/data/task_report_submit_service.dart';
-import '../../../tasks/presentation/widgets/task_image_picker.dart';
+import '../../../tasks/presentation/widgets/image_uploader.dart';
 import '../../../tasks/presentation/widgets/task_visual.dart';
 import '../../../tasks/providers/measurement_batch_providers.dart';
 import '../../../tasks/providers/measurement_record_providers.dart';
@@ -50,7 +51,9 @@ class _TaskReportActionPanelState
   final _noteController = TextEditingController();
   bool _isSubmitting = false;
   bool _hasStarted = false; // Nghiệp vụ: phải bắt đầu trước khi báo cáo
-  List<File> _selectedImages = [];
+
+  /// Ảnh local + AI provider riêng (mỗi ảnh 1 provider).
+  List<UploadImageItem> _uploadImages = [];
 
   // Dynamic field controllers
   final Map<String, TextEditingController> _valueControllers = {};
@@ -233,10 +236,12 @@ class _TaskReportActionPanelState
           ? 'Đã ghi nhận ${bridge.bulk?.items.length ?? 0} chỉ số. $note'
           : 'Đã ghi nhận ${bridge.bulk?.items.length ?? 0} chỉ số.';
 
-      final imageParams = _selectedImages
-          .map((f) => TaskReportImageParam(
-                file: f,
+      final imageParams = _uploadImages
+          .map((img) => TaskReportImageParam(
+                file: img.file,
+                caption: img.caption,
                 uploadedAt: DateTime.now(),
+                aiProvider: img.aiProvider, // ← AI provider RIÊNG của ảnh
               ))
           .toList();
 
@@ -364,11 +369,13 @@ class _TaskReportActionPanelState
                   const SizedBox(height: AppSpacing.md),
                   _buildNotesField(tt, cs),
                   const SizedBox(height: AppSpacing.md),
-                  TaskImagePicker(
-                    images: _selectedImages,
+                  ImageUploader(
+                    images: _uploadImages,
                     onImagesChanged: (imgs) =>
-                        setState(() => _selectedImages = imgs),
-                    isUploading: _isSubmitting,
+                        setState(() => _uploadImages = imgs),
+                    disabled: _isSubmitting,
+                    defaultAiProvider: AiProviders.defaultProvider,
+                    enableAiScan: true,
                   ),
                 ],
               ],
@@ -822,10 +829,12 @@ class _TaskReportActionPanelState
     setState(() => _isSubmitting = true);
 
     try {
-      final imageParams = _selectedImages
-          .map((f) => TaskReportImageParam(
-                file: f,
+      final imageParams = _uploadImages
+          .map((img) => TaskReportImageParam(
+                file: img.file,
+                caption: img.caption,
                 uploadedAt: DateTime.now(),
+                aiProvider: img.aiProvider, // ← AI provider RIÊNG của ảnh
               ))
           .toList();
 

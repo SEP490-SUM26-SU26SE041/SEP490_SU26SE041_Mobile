@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,14 +8,10 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../shared/widgets/snms_card.dart';
 import '../../../shared/models/growth_task_model.dart' as internal;
 import '../../../shared/utils/report_field_labels.dart';
-import '../../tasks/data/task_report_constants.dart';
-import '../../tasks/data/task_report_submit_service.dart';
 import '../../tasks/providers/task_providers.dart';
-import '../../tasks/presentation/widgets/task_image_picker.dart';
 import '../../tasks/presentation/widgets/measurement_recording_sheet.dart';
-import '../../tasks/presentation/widgets/modern_quick_report_sheet.dart';
-import '../../tasks/presentation/widgets/task_visual.dart';
-import '../../../shared/utils/report_field_labels.dart';
+import '../../student/presentation/widgets/task_report_action_panel.dart';
+import '../../student/presentation/widgets/task_report_view_sheet.dart';
 
 class TechnicianTaskDetailScreen extends ConsumerStatefulWidget {
   const TechnicianTaskDetailScreen({super.key, required this.taskId});
@@ -28,22 +23,10 @@ class TechnicianTaskDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetailScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _waterController = TextEditingController();
-  final _fertilizerController = TextEditingController();
-  final _noteController = TextEditingController();
-  final Map<String, TextEditingController> _fieldControllers = {};
-  String _selectedHealth = 'Tốt';
-  bool _isSubmitting = false;
-  List<File> _selectedImages = [];
-
-  @override
-  void dispose() {
-    _waterController.dispose();
-    _fertilizerController.dispose();
-    _noteController.dispose();
-    super.dispose();
-  }
+  // NOTE: Form báo cáo giờ dùng TaskReportActionPanel y hệt Student
+  // → render UI + quản lý state nội bộ của nó.
+  // Technician giữ lại action `_startTask` để bắt đầu task khi ở trạng thái pending.
+  bool _isStartingTask = false;
 
   Color _statusColor(api.TaskStatus s) => switch (s) {
     api.TaskStatus.pending => AppColors.warning,
@@ -83,6 +66,15 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
 
   String _typeLabel(api.TaskType t) => t.labelVi;
 
+  /// Mở form xem lại báo cáo (read-only) sau khi submit thành công.
+  /// Logic y hệt Student — dùng chung sheet `showTaskReportViewSheet`
+  /// để hiển thị text + ảnh + kết quả AI scan có ý nghĩa.
+  Future<void> _openReportViewSheet(String taskId) async {
+    ref.invalidate(taskReportByTaskProvider(taskId));
+    ref.invalidate(taskImagesByTaskProvider(taskId));
+    await showTaskReportViewSheet(context, taskId);
+  }
+
   @override
   Widget build(BuildContext context) {
     final taskAsync = ref.watch(taskDetailProvider(widget.taskId));
@@ -99,64 +91,107 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => context.pop(),
         ),
-      ),
-      body: taskAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline_rounded, size: 64, color: cs.error),
-                const SizedBox(height: AppSpacing.md),
-                Text('Không thể tải công việc', style: tt.titleMedium),
-                const SizedBox(height: AppSpacing.xs),
-                Text('$e', textAlign: TextAlign.center,
-                    style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(128))),
-                const SizedBox(height: AppSpacing.lg),
-                ElevatedButton(
-                  onPressed: () => ref.invalidate(taskDetailProvider(widget.taskId)),
-                  child: const Text('Thử lại'),
-                ),
-              ],
-            ),
+        actions: [
+          // Nút xem lịch sử báo cáo — giống Student.
+          IconButton(
+            tooltip: 'Lịch sử báo cáo',
+            icon: const Icon(Icons.history_rounded),
+            onPressed: () => _openReportViewSheet(widget.taskId),
           ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(taskDetailProvider(widget.taskId));
+          ref.invalidate(taskReportByTaskProvider(widget.taskId));
+          ref.invalidate(taskImagesByTaskProvider(widget.taskId));
+          await Future.delayed(const Duration(milliseconds: 200));
+        },
+        child: taskAsync.when(
+        loading: () => ListView(
+          children: const [
+            SizedBox(height: 200),
+            Center(child: CircularProgressIndicator()),
+          ],
+        ),
+        error: (e, _) => ListView(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          children: [
+            const SizedBox(height: 80),
+            Icon(Icons.error_outline_rounded, size: 64, color: cs.error),
+            const SizedBox(height: AppSpacing.md),
+            Text('Không thể tải công việc',
+                style: tt.titleMedium, textAlign: TextAlign.center),
+            const SizedBox(height: AppSpacing.xs),
+            Text('$e', textAlign: TextAlign.center,
+                style: tt.bodySmall?.copyWith(color: cs.onSurface.withAlpha(128))),
+            const SizedBox(height: AppSpacing.lg),
+            Center(
+              child: ElevatedButton(
+                onPressed: () => ref.invalidate(taskDetailProvider(widget.taskId)),
+                child: const Text('Thử lại'),
+              ),
+            ),
+          ],
         ),
         data: (task) => _buildBody(context, task, tt, cs),
+      ),
       ),
     );
   }
 
   Widget _buildBody(BuildContext context, api.TaskModel task, TextTheme tt, ColorScheme cs) {
+    final isCompleted = task.status == api.TaskStatus.completed ||
+        task.status == api.TaskStatus.approved ||
+        task.status == api.TaskStatus.submitted;
+
+    // Kiểm tra task đã có report chưa (mỗi task chỉ được gửi 1 report).
+    final reportsAsync = ref.watch(taskReportByTaskProvider(task.id));
+    final hasReport = reportsAsync.maybeWhen(
+      data: (list) => list.isNotEmpty,
+      orElse: () => false,
+    );
+
+    // Technician cũng dùng cùng logic với Student:
+    //   - completed/approved/submitted/rejected/cancelled → không cho submit
+    //   - task đã có report → không cho submit
+    final cannotSubmit = isCompleted ||
+        task.status == api.TaskStatus.rejected ||
+        task.status == api.TaskStatus.cancelled ||
+        hasReport;
+
     return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(AppSpacing.lg),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildTaskHeader(task, tt, cs),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildTaskHeader(task, tt, cs),
+          const SizedBox(height: AppSpacing.lg),
+          _buildExperimentInfo(task, tt, cs),
+          const SizedBox(height: AppSpacing.lg),
+          _buildAssignmentInfo(task, tt, cs),
+          const SizedBox(height: AppSpacing.lg),
+          _buildGuidanceCard(task, tt, cs),
+          const SizedBox(height: AppSpacing.lg),
+          if (cannotSubmit)
+            _buildReportView(task, tt, cs, hasReport: hasReport)
+          else ...[
+            // Form báo cáo dynamic từ BE (y hệt Student):
+            // tự load measurement definitions theo experiment, chọn AI provider,
+            // upload ảnh + submit TaskReport + MeasurementRecords + TaskImages.
+            TaskReportActionPanel(
+              task: task,
+              onReportSubmitted: () {
+                _openReportViewSheet(task.id);
+              },
+            ),
             const SizedBox(height: AppSpacing.lg),
-            _buildExperimentInfo(task, tt, cs),
-            const SizedBox(height: AppSpacing.lg),
-            _buildAssignmentInfo(task, tt, cs),
-            const SizedBox(height: AppSpacing.lg),
-            _buildGuidanceCard(task, tt, cs),
-            const SizedBox(height: AppSpacing.lg),
-            if (task.status == api.TaskStatus.pending ||
-                task.status == api.TaskStatus.inProgress) ...[
-              _buildCareReportSection(task, tt, cs),
-              const SizedBox(height: AppSpacing.lg),
-              _buildActionButtons(task, tt, cs),
-            ] else if (task.status == api.TaskStatus.completed ||
-                task.status == api.TaskStatus.submitted ||
-                task.status == api.TaskStatus.approved) ...[
-              _buildReportView(task, tt, cs),
-            ],
-            const SizedBox(height: AppSpacing.huge),
+            // Các action riêng của Technician: Bắt đầu / Bảng đo / Tăng trưởng.
+            _buildTechnicianActions(task),
           ],
-        ),
+          const SizedBox(height: AppSpacing.huge),
+        ],
       ),
     );
   }
@@ -399,132 +434,29 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
     );
   }
 
-  Widget _buildCareReportSection(api.TaskModel task, TextTheme tt, ColorScheme cs) {
-    final isWatering = task.taskType == api.TaskType.watering;
-    final isFertilizing = task.taskType == api.TaskType.fertilizing;
-    final showBoth = isWatering || isFertilizing;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.assignment_turned_in_rounded, size: 18, color: cs.onSurface.withAlpha(153)),
-            const SizedBox(width: AppSpacing.sm),
-            Text('Báo cáo công việc', style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        SNMSCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (showBoth) ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Lượng nước (ml)',
-                              style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
-                          const SizedBox(height: AppSpacing.sm),
-                          TextFormField(
-                            controller: _waterController,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              hintText: 'VD: 500',
-                              suffixText: 'ml',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Phân bón (g)',
-                              style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
-                          const SizedBox(height: AppSpacing.sm),
-                          TextFormField(
-                            controller: _fertilizerController,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              hintText: 'VD: 50',
-                              suffixText: 'g',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
-              ],
-              Text('Ghi chú công việc',
-                  style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w500)),
-              const SizedBox(height: AppSpacing.sm),
-              TextFormField(
-                controller: _noteController,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  hintText: 'Mô tả chi tiết công việc đã thực hiện...',
-                  alignLabelWithHint: true,
-                ),
-                validator: (v) => v?.isEmpty == true ? 'Vui lòng nhập ghi chú' : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TaskImagePicker(
-                images: _selectedImages,
-                onImagesChanged: (imgs) => setState(() => _selectedImages = imgs),
-                isUploading: _isSubmitting,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionButtons(api.TaskModel task, TextTheme tt, ColorScheme cs) {
+  // ─── Care report section & legacy submit đã được thay bằng TaskReportActionPanel
+  // (y hệt Student — dùng chung widget). Các nút hành động bên dưới giữ riêng
+  // cho Technician: Bắt đầu (pending), Bảng đo, Xem chỉ số tăng trưởng.
+  Widget _buildTechnicianActions(api.TaskModel task) {
     final isPending = task.status == api.TaskStatus.pending;
-    final typeSpec = getTaskVisualSpec(task.taskType);
 
     return Column(
       children: [
-        // Big primary CTA — open modern Quick Report sheet.
-        SizedBox(
-          width: double.infinity,
-          height: 56,
-          child: FilledButton.icon(
-            onPressed: _isSubmitting
-                ? null
-                : () async {
-                    await showApiQuickReportSheet(context, task);
-                    if (mounted) {
-                      ref.invalidate(taskReportByTaskProvider(task.id));
-                      ref.invalidate(taskDetailProvider(task.id));
-                    }
-                  },
-            style: FilledButton.styleFrom(
-              backgroundColor: typeSpec.color,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+        if (isPending) ...[
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _isStartingTask ? null : () => _startTask(task.id),
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: Text(_isStartingTask ? 'Đang bắt đầu...' : 'Bắt đầu'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
-              elevation: 0,
-            ),
-            icon: const Icon(Icons.flash_on_rounded,
-                size: 18, color: Colors.white),
-            label: Text(
-              'Hoàn thành & Báo cáo · ${typeSpec.label}',
-              style: tt.titleSmall
-                  ?.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
             ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
+        ],
         Row(
           children: [
             Expanded(
@@ -546,75 +478,71 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
                 ),
               ),
             ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _isSubmitting ? null : () => _submitReport(
-                    task.id, task.taskType,
-                    experimentId: task.experimentId,
-                    batchId: task.batchId,
+            if (task.batchId != null && task.batchId!.isNotEmpty) ...[
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => context.push(
+                    '/growth/${task.batchId}?batchCode=${Uri.encodeComponent(task.batchCode ?? task.batchId!)}&experimentId=${task.experimentId}',
                   ),
-                icon: _isSubmitting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.check_circle_rounded, size: 18, color: Colors.white),
-                label: Text('Hoàn thành',
-                    style: tt.labelLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w600)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  icon: const Icon(Icons.trending_up_rounded, size: 18),
+                  label: const Text('Tăng trưởng'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.success,
+                    side: BorderSide(color: AppColors.success.withAlpha(80)),
+                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
-        if (isPending) ...[
-          const SizedBox(height: AppSpacing.sm),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _isSubmitting ? null : () => _startTask(task.id),
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('Bắt đầu'),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ),
-        ],
-        if (task.batchId != null && task.batchId!.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.sm),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => context.push(
-                '/growth/${task.batchId}?batchCode=${Uri.encodeComponent(task.batchCode ?? task.batchId!)}&experimentId=${task.experimentId}',
-              ),
-              icon: const Icon(Icons.trending_up_rounded, size: 18),
-              label: const Text('Xem chỉ số tăng trưởng'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.success,
-                side: BorderSide(color: AppColors.success.withAlpha(80)),
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ),
-        ],
       ],
     );
   }
 
-  Widget _buildReportView(api.TaskModel task, TextTheme tt, ColorScheme cs) {
+  Widget _buildReportView(api.TaskModel task, TextTheme tt, ColorScheme cs, {bool hasReport = false}) {
     final reportAsync = ref.watch(taskReportByTaskProvider(task.id));
+    final hasSubmittedReport = hasReport ||
+        task.status == api.TaskStatus.completed ||
+        task.status == api.TaskStatus.approved ||
+        task.status == api.TaskStatus.submitted;
+
+    if (!hasSubmittedReport) {
+      // Công việc chưa được gửi báo cáo.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.lock_outline_rounded,
+                  size: 18, color: AppColors.error),
+              const SizedBox(width: AppSpacing.sm),
+              Text('Không thể gửi báo cáo',
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SNMSCard(
+            child: Row(
+              children: [
+                Icon(Icons.error_outline_rounded, color: AppColors.error),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Text(
+                    'Công việc ở trạng thái "${_statusLabel(task.status)}" nên không thể gửi báo cáo.',
+                    style: tt.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
     return reportAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => SNMSCard(
@@ -640,12 +568,18 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
           children: [
             Row(
               children: [
-                Icon(Icons.assignment_turned_in_rounded,
-                    color: AppColors.success, size: 18),
+                Icon(Icons.history_rounded, color: AppColors.success, size: 18),
                 const SizedBox(width: AppSpacing.sm),
                 Text(
-                  'Báo cáo',
-                  style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                  'Báo cáo đã gửi',
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const Spacer(),
+                // Nút "Xem đầy đủ" mở sheet y hệt Student.
+                TextButton.icon(
+                  onPressed: () => _openReportViewSheet(task.id),
+                  icon: const Icon(Icons.open_in_full_rounded, size: 16),
+                  label: const Text('Xem đầy đủ'),
                 ),
               ],
             ),
@@ -852,6 +786,7 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
   }
 
   Future<void> _startTask(String taskId) async {
+    setState(() => _isStartingTask = true);
     try {
       await ref.read(startTaskProvider(taskId).future);
       ref.invalidate(taskDetailProvider(taskId));
@@ -870,97 +805,8 @@ class _TechnicianTaskDetailScreenState extends ConsumerState<TechnicianTaskDetai
           SnackBar(content: Text('Lỗi: $e'), backgroundColor: AppColors.error),
         );
       }
-    }
-  }
-
-  Future<void> _submitReport(String taskId, api.TaskType taskType, {
-    String? experimentId,
-    String? batchId,
-  }) async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _isSubmitting = true);
-
-    try {
-      final reportText = _buildReportText(taskType);
-      final resultData = _buildResultData(taskType);
-
-      final imageParams = _selectedImages
-          .map((f) => TaskReportImageParam(
-                file: f,
-                uploadedAt: DateTime.now(),
-              ))
-          .toList();
-
-      final params = SubmitParams(
-        taskId: taskId,
-        reportText: reportText,
-        resultData: resultData,
-        images: imageParams,
-        experimentId: experimentId,
-        batchId: batchId,
-        markComplete: true,
-        hasNewContent: true,
-      );
-
-      final outcome = await ref
-          .read(taskReportSubmitServiceProvider)
-          .submitAndOptionallyComplete(params);
-
-      ref.invalidate(taskDetailProvider(taskId));
-      ref.invalidate(taskReportByTaskProvider(taskId));
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(outcome.toUserMessage()),
-            backgroundColor: outcome.mode == SubmitMode.error
-                ? AppColors.error
-                : AppColors.success,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        context.pop();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi: $e'), backgroundColor: AppColors.error),
-        );
-      }
     } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) setState(() => _isStartingTask = false);
     }
-  }
-
-  String _buildReportText(api.TaskType taskType) {
-    final parts = <String>[];
-    if (taskType == api.TaskType.watering || taskType == api.TaskType.fertilizing) {
-      if (_waterController.text.isNotEmpty) {
-        parts.add('Nước: ${_waterController.text}ml');
-      }
-      if (_fertilizerController.text.isNotEmpty) {
-        parts.add('Phân bón: ${_fertilizerController.text}g');
-      }
-    }
-    if (_noteController.text.isNotEmpty) {
-      parts.add(_noteController.text);
-    }
-    return parts.isEmpty ? 'Đã hoàn thành' : parts.join(' | ');
-  }
-
-  Map<String, String> _buildResultData(api.TaskType taskType) {
-    final out = <String, String>{};
-    final schema = kQuickFormSchema[taskType];
-    if (schema != null) {
-      for (final f in schema.fields) {
-        final c = _fieldControllers[f.key];
-        final v = c?.text.trim();
-        if (v != null && v.isNotEmpty) out[f.key] = v;
-      }
-    }
-    final note = _noteController.text.trim();
-    if (note.isNotEmpty) out['additionalNotes'] = note;
-    out['condition'] = _selectedHealth;
-    return out;
   }
 }

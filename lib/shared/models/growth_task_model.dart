@@ -1,5 +1,10 @@
 import '../../core/utils/date_utils.dart';
+import '../../core/api/models/task_report_model.dart';
 import 'experiment_model.dart';
+
+// Re-export enhanced TaskImageModel (có AI fields) từ core layer.
+/// Use [TaskImageModel] from `task_report_model.dart` for AI-enabled images.
+export '../../core/api/models/task_report_model.dart' show TaskImageModel;
 
 class GrowthRecordModel {
   const GrowthRecordModel({
@@ -108,34 +113,7 @@ class TaskReportModel {
   }
 }
 
-// TaskImage Model
-class TaskImageModel {
-  const TaskImageModel({
-    required this.id,
-    required this.taskId,
-    required this.reportId,
-    required this.imageUrl,
-    required this.uploadedAt,
-    this.description,
-  });
-  final String id;
-  final String taskId;
-  final String reportId;
-  final String imageUrl;
-  final DateTime uploadedAt;
-  final String? description;
-
-  factory TaskImageModel.fromJson(Map<String, dynamic> json) {
-    return TaskImageModel(
-      id: json['id'] ?? '',
-      taskId: json['taskId'] ?? '',
-      reportId: json['reportId'] ?? '',
-      imageUrl: json['imageUrl'] ?? json['url'] ?? '',
-      uploadedAt: parseApiDateTimeOrNow(json['uploadedAt'] ?? json['createdAt']?.toString()),
-      description: json['description'],
-    );
-  }
-}
+// TaskImage Model is re-exported at the top of this file (see above).
 
 class TaskModel {
   const TaskModel({

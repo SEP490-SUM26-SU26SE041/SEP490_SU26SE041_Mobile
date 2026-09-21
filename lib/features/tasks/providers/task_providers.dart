@@ -108,6 +108,8 @@ class TaskRepository {
       final noteString = rd != null && rd['additionalNotes'] != null
           ? rd['additionalNotes'].toString()
           : null;
+      // Giữ lại images từ API response để hiển thị trong report history
+      final reportImages = report.images ?? const [];
       return internal.TaskReportModel(
         id: report.id,
         taskId: report.taskId,
@@ -115,7 +117,7 @@ class TaskRepository {
         description: noteString ?? report.reportText,
         submittedAt: report.reportedAt,
         submittedBy: report.reporterName,
-        images: const [],
+        images: reportImages,
         rawResultData: rd,
       );
     }).toList();
@@ -132,11 +134,13 @@ class TaskRepository {
       for (final img in imgs) {
         allImages.add(internal.TaskImageModel(
           id: img.id,
-          taskId: taskId,
-          reportId: img.taskReportId,
+          experimentId: img.experimentId,
+          batchId: img.batchId,
+          taskReportId: img.taskReportId,
           imageUrl: img.imageUrl,
-          uploadedAt: img.createdAt,
-          description: img.caption,
+          uploadedBy: img.uploadedBy,
+          capturedAt: img.capturedAt,
+          createdAt: img.createdAt,
         ));
       }
     }

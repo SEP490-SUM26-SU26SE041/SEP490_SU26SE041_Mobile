@@ -7,7 +7,10 @@ import '../../../../shared/models/growth_task_model.dart';
 import '../../../../shared/widgets/snms_card.dart';
 import '../../../../shared/utils/report_field_labels.dart';
 import '../../../tasks/data/metric_catalog.dart';
+import '../../../tasks/presentation/widgets/ai_badge.dart';
+import '../../../tasks/presentation/widgets/ai_result_modal.dart';
 import '../../../tasks/providers/measurement_definition_provider.dart';
+import '../../../tasks/providers/task_image_providers.dart';
 import '../../../tasks/providers/task_providers.dart';
 
 /// Bottom sheet hiển thị lịch sử báo cáo đã gửi (read-only).
@@ -309,21 +312,45 @@ class _ReportContent extends ConsumerWidget {
               orElse: () => null,
             );
 
-    // Ưu tiên images từ report model (BE embed); fallback qua task images provider.
-    List<TaskImageModel> reportImages;
-    if (report.images.isNotEmpty) {
-      reportImages = report.images
-          .where((img) => img.imageUrl.isNotEmpty)
+    // Ưu tiên images kèm AI analysis từ endpoint /task-images/task/{id}/detail.
+    // Nếu đang loading/error → dùng report.images (không có AI).
+    // Dùng DateTime.now().millisecondsSinceEpoch để force refresh mỗi lần build
+    // để đảm bảo AsyncValue luôn update khi user mở sheet.
+    final reportImagesAsync = ref.watch(
+      taskImagesByReportWithAnalysisProvider(report.id),
+    );
+
+    // Helper build images từ report.images
+    List<_ImageWithAi> buildImagesFromReport() {
+      final baseImages = report.images.where((img) => img.imageUrl.isNotEmpty).toList();
+      if (baseImages.isEmpty) return [];
+      return baseImages
+          .map((img) => _ImageWithAi(model: img, hasAi: false))
           .toList();
-    } else {
-      final imagesAsync = ref.watch(taskImagesByTaskProvider(taskId));
-      reportImages = imagesAsync.maybeWhen(
-        data: (list) => list
-            .where((img) => img.reportId == report.id && img.imageUrl.isNotEmpty)
-            .toList(),
-        orElse: () => <TaskImageModel>[],
-      );
     }
+
+    // Merge: ưu tiên images từ async (có AI), fallback về report.images (show ảnh trước)
+    final List<_ImageWithAi> imagesWithAi = reportImagesAsync.when(
+      data: (list) {
+        if (list.isNotEmpty) {
+          return list
+              .where((img) => img.imageUrl.isNotEmpty)
+              .map((img) => _ImageWithAi(
+                    model: img,
+                    hasAi: img.aiAnalysis != null,
+                  ))
+              .toList();
+        }
+        return buildImagesFromReport();
+      },
+      loading: buildImagesFromReport,
+      error: (_, __) => buildImagesFromReport(),
+    );
+
+    // Check xem có AI results không (từ imagesWithAi đã merge)
+    // (giữ lại để có thể dùng sau nếu cần)
+    // ignore: unused_local_variable
+    final hasAiResults = imagesWithAi.any((img) => img.model.aiAnalysis != null);
 
     return SNMSCard(
       child: Column(
@@ -347,9 +374,22 @@ class _ReportContent extends ConsumerWidget {
             tt: tt,
             cs: cs,
           ),
-          if (reportImages.isNotEmpty) ...[
+          if (imagesWithAi.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.lg),
-            _ImagesSection(images: reportImages, tt: tt, cs: cs),
+            _ImagesSection(
+              imagesWithAi: imagesWithAi,
+              taskReportId: report.id,
+              tt: tt,
+              cs: cs,
+            ),
+            // LUÔN hiển thị section "Kết quả AI chẩn đoán" (loading nếu chưa có data)
+            const SizedBox(height: AppSpacing.lg),
+            _AiResultsInline(
+              imagesWithAi: imagesWithAi,
+              asyncState: reportImagesAsync,
+              tt: tt,
+              cs: cs,
+            ),
           ],
         ],
       ),
@@ -625,18 +665,21 @@ class _ResultChip extends StatelessWidget {
 }
 
 /// Hiển thị grid ảnh đính kèm trong report view (read-only).
-class _ImagesSection extends StatelessWidget {
+/// Bấm vào ảnh → mở AiResultModal xem chi tiết kết quả AI + retry.
+class _ImagesSection extends ConsumerWidget {
   const _ImagesSection({
-    required this.images,
+    required this.imagesWithAi,
+    required this.taskReportId,
     required this.tt,
     required this.cs,
   });
-  final List<TaskImageModel> images;
+  final List<_ImageWithAi> imagesWithAi;
+  final String taskReportId;
   final TextTheme tt;
   final ColorScheme cs;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -656,7 +699,7 @@ class _ImagesSection extends StatelessWidget {
                 color: AppColors.success.withAlpha(25),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Text('${images.length}',
+              child: Text('${imagesWithAi.length}',
                   style: tt.labelSmall?.copyWith(
                       color: AppColors.success, fontWeight: FontWeight.w700)),
             ),
@@ -667,10 +710,11 @@ class _ImagesSection extends StatelessWidget {
           height: 96,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: images.length,
+            itemCount: imagesWithAi.length,
             separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
             itemBuilder: (_, i) => _ImageTile(
-              image: images[i],
+              img: imagesWithAi[i],
+              taskReportId: taskReportId,
               tt: tt,
               cs: cs,
             ),
@@ -681,12 +725,37 @@ class _ImagesSection extends StatelessWidget {
   }
 }
 
-class _ImageTile extends StatelessWidget {
-  const _ImageTile(
-      {required this.image, required this.tt, required this.cs});
-  final TaskImageModel image;
+class _ImageTile extends ConsumerWidget {
+  const _ImageTile({
+    required this.img,
+    required this.taskReportId,
+    required this.tt,
+    required this.cs,
+  });
+  final _ImageWithAi img;
+  final String taskReportId;
   final TextTheme tt;
   final ColorScheme cs;
+
+  TaskImageModel get image => img.model;
+
+  void _openAiModal(BuildContext context) {
+    if (image.aiProvider == null) {
+      // Không có AI provider → mở full screen
+      _openFullScreen(context);
+      return;
+    }
+    showAiResultModal(
+      context,
+      image: image,
+      taskReportId: taskReportId,
+      onImageUpdated: (_) {
+        // Refresh parent qua invalidation
+        // ignore: unused_result
+        // (consumer reloads via Riverpod)
+      },
+    );
+  }
 
   void _openFullScreen(BuildContext context) {
     showDialog<void>(
@@ -723,9 +792,9 @@ class _ImageTile extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return GestureDetector(
-      onTap: () => _openFullScreen(context),
+      onTap: () => _openAiModal(context),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(
@@ -758,7 +827,13 @@ class _ImageTile extends StatelessWidget {
                     color: cs.onSurface.withAlpha(102), size: 28),
               ),
             ),
-            if (image.description != null && image.description!.isNotEmpty)
+            // AI badge overlay (top-right)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: AiBadge(image: img.model),
+            ),
+            if (img.model.caption != null && img.model.caption!.isNotEmpty)
               Positioned(
                 left: 0,
                 right: 0,
@@ -777,7 +852,7 @@ class _ImageTile extends StatelessWidget {
                     ),
                   ),
                   child: Text(
-                    image.description!,
+                    img.model.caption!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: tt.labelSmall?.copyWith(
@@ -793,5 +868,634 @@ class _ImageTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Wrapper chứa image model + flag có AI hay không.
+class _ImageWithAi {
+  const _ImageWithAi({required this.model, required this.hasAi});
+  final TaskImageModel model;
+  final bool hasAi;
+}
+
+/// Widget hiển thị AI results inline trong report view.
+/// Hiện kết quả chẩn đoán AI (label, confidence, severity) ngay trong sheet.
+/// LUÔN hiển thị section, kể cả khi API đang loading.
+class _AiResultsInline extends StatelessWidget {
+  const _AiResultsInline({
+    required this.imagesWithAi,
+    required this.asyncState,
+    required this.tt,
+    required this.cs,
+  });
+
+  final List<_ImageWithAi> imagesWithAi;
+  final AsyncValue<List<TaskImageModel>> asyncState;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    // Lấy các ảnh có AI analysis (check trực tiếp từ model)
+    final aiImages = imagesWithAi
+        .where((img) => img.model.aiAnalysis != null)
+        .toList();
+
+    // Trạng thái loading
+    final isLoading = asyncState.isLoading;
+    final hasError = asyncState.hasError;
+
+    // Tổng số ảnh trong report
+    final totalImages = imagesWithAi.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.smart_toy_rounded,
+                size: 18, color: AppColors.primary),
+            const SizedBox(width: AppSpacing.sm),
+            Text('Kết quả AI chẩn đoán',
+                style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(width: AppSpacing.sm),
+            // Loading indicator nhỏ bên cạnh title
+            if (isLoading)
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            // Badge số lượng AI results
+            if (!isLoading && !hasError && aiImages.isNotEmpty) ...[
+              const SizedBox(width: AppSpacing.xs),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withAlpha(25),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text('${aiImages.length}/$totalImages',
+                    style: tt.labelSmall?.copyWith(
+                        color: AppColors.primary, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        // Ưu tiên lấy AI images từ async data (có AI analysis đầy đủ)
+        if (aiImages.isNotEmpty)
+          ...aiImages.map((img) => _AiResultCard(
+                imageWithAi: img,
+                tt: tt,
+                cs: cs,
+              ))
+        else if (isLoading && aiImages.isEmpty)
+          // Đang load API → show skeleton/loading card
+          _AiLoadingCard(tt: tt, cs: cs)
+        else if (hasError && aiImages.isEmpty)
+          // Lỗi API + không có data fallback
+          _AiErrorCard(
+            error: asyncState.error.toString(),
+            tt: tt,
+            cs: cs,
+          )
+        else
+          // Không có ảnh nào có AI
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest.withAlpha(80),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline_rounded,
+                    color: cs.onSurface.withAlpha(153), size: 18),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'Các ảnh này chưa được quét bằng AI.',
+                    style: tt.bodySmall?.copyWith(
+                        color: cs.onSurface.withAlpha(153)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Loading card khi đang đợi AI scan results.
+class _AiLoadingCard extends StatelessWidget {
+  const _AiLoadingCard({required this.tt, required this.cs});
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withAlpha(15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withAlpha(60)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Đang tải kết quả AI...',
+                  style: tt.titleSmall?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Vui lòng đợi trong giây lát',
+                  style: tt.bodySmall?.copyWith(
+                      color: cs.onSurface.withAlpha(153)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Error card khi load AI results thất bại.
+class _AiErrorCard extends StatelessWidget {
+  const _AiErrorCard({
+    required this.error,
+    required this.tt,
+    required this.cs,
+  });
+  final String error;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.error.withAlpha(15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.error.withAlpha(60)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline_rounded,
+              color: AppColors.error, size: 20),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Không thể tải kết quả AI',
+                  style: tt.titleSmall?.copyWith(
+                    color: AppColors.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  error.length > 200 ? '${error.substring(0, 200)}...' : error,
+                  style: tt.bodySmall?.copyWith(
+                      color: cs.onSurface.withAlpha(180)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AiResultCard extends StatelessWidget {
+  const _AiResultCard({
+    required this.imageWithAi,
+    required this.tt,
+    required this.cs,
+  });
+
+  final _ImageWithAi imageWithAi;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    final img = imageWithAi.model;
+    final analysis = img.aiAnalysis;
+
+    // Lấy thông tin từ model
+    final label = img.aiPredictedLabel ?? analysis?.label;
+    final confidence = img.aiConfidence ?? analysis?.confidence;
+    final isHealthy = analysis?.isHealthy ?? false;
+    final isGateRejection = analysis?.isGateRejection ?? false;
+    final annotatedUrl = img.aiAnnotatedImageUrl ?? analysis?.annotatedImageUrl;
+    final provider = img.aiProvider ?? analysis?.aiProvider;
+
+    // Map label & finalStatus sang tiếng Việt có ý nghĩa
+    final labelVi = _getVietnameseLabel(label);
+    final statusLabel = _mapFinalStatus(analysis?.finalStatus);
+    final severity = _getSeverityFromStatus(analysis?.finalStatus, label);
+
+    // Xác định nhãn chính hiển thị trên header (ưu tiên label - tên bệnh cụ thể)
+    final hasLabel = label != null && label.isNotEmpty && labelVi != label;
+    final headerText = hasLabel
+        ? labelVi
+        : statusLabel; // fallback nếu label rỗng
+
+    // Màu sắc theo trạng thái
+    Color statusColor;
+    IconData statusIcon;
+    String statusText;
+
+    if (isGateRejection) {
+      statusColor = AppColors.warning;
+      statusIcon = Icons.warning_amber_rounded;
+      statusText = 'Bị từ chối bởi gate';
+    } else if (isHealthy ||
+        (analysis?.finalStatus?.toLowerCase().contains('healthy') ?? false) ||
+        label?.toLowerCase().contains('healthy') == true ||
+        label?.toLowerCase().contains('nopest') == true) {
+      statusColor = AppColors.success;
+      statusIcon = Icons.check_circle_rounded;
+      statusText = headerText; // "Cây khỏe mạnh" / "Không có sâu bệnh"
+    } else if (hasLabel && !isHealthy) {
+      // Có label bệnh cụ thể → dùng label làm header, màu theo severity
+      statusColor = _getSeverityColor(severity);
+      statusIcon = Icons.local_hospital_rounded;
+      statusText = headerText;
+    } else {
+      statusColor = _getSeverityColor(severity);
+      statusIcon = Icons.local_hospital_rounded;
+      statusText = 'Phát hiện sâu bệnh';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: statusColor.withAlpha(15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: statusColor.withAlpha(60)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header với icon + status text
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(statusIcon, color: statusColor, size: 22),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  statusText,
+                  style: tt.titleSmall?.copyWith(
+                    color: statusColor,
+                    fontWeight: FontWeight.w700,
+                    height: 1.3,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (!isHealthy && !isGateRejection)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _getSeverityColor(severity).withAlpha(30),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    severity.label,
+                    style: tt.labelSmall?.copyWith(
+                      color: _getSeverityColor(severity),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          // Ảnh annotated (nếu có) full-width - thoáng, dễ nhìn
+          if (annotatedUrl != null && annotatedUrl.isNotEmpty) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.network(
+                annotatedUrl,
+                width: double.infinity,
+                height: 180,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, p) => p == null
+                    ? child
+                    : Container(
+                        width: double.infinity,
+                        height: 180,
+                        color: cs.surfaceContainerHighest,
+                        child: const Center(
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                errorBuilder: (_, __, ___) => Container(
+                  width: double.infinity,
+                  height: 180,
+                  color: cs.surfaceContainerHighest,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.broken_image_rounded,
+                          color: cs.onSurface.withAlpha(102), size: 32),
+                      const SizedBox(height: 4),
+                      Text('Không tải được ảnh',
+                          style: tt.bodySmall?.copyWith(
+                              color: cs.onSurface.withAlpha(153))),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          // Thông tin chi tiết - layout cột để không bị bóp chữ
+          _InfoBlock(
+            entries: [
+              if (hasLabel && statusText != labelVi)
+                _InfoEntry('Nhãn bệnh', labelVi),
+              if (analysis?.finalStatus != null && analysis!.finalStatus != label)
+                _InfoEntry('Trạng thái', statusLabel),
+              if (confidence != null)
+                _InfoEntry('Độ tin cậy', '${(confidence * 100).toStringAsFixed(1)}%'),
+              if (analysis?.detectionCount != null && analysis!.detectionCount! > 0)
+                _InfoEntry('Số phát hiện', '${analysis.detectionCount}'),
+              if (provider != null)
+                _InfoEntry('Model AI',
+                    _formatProviderName(provider)),
+              if (analysis?.gateLabel != null &&
+                  analysis!.gateLabel!.isNotEmpty &&
+                  analysis.gateLabel != label)
+                _InfoEntry('Gate', _formatGateLabel(analysis.gateLabel!)),
+            ],
+            tt: tt,
+            cs: cs,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Format provider name cho dễ đọc.
+  /// "TomatoLeafDiseaseOnnx" → "Tomato Leaf Disease"
+  String _formatProviderName(String p) {
+    var result = p;
+    // Xóa các suffix phổ biến
+    for (final suffix in ['Onnx', 'V2', 'V1', 'Classifier', 'Detector']) {
+      if (result.endsWith(suffix)) {
+        result = result.substring(0, result.length - suffix.length);
+      }
+    }
+    // Tách CamelCase → có space
+    result = result.replaceAllMapped(
+      RegExp(r'([a-z])([A-Z])'),
+      (m) => '${m[1]} ${m[2]}',
+    );
+    return result;
+  }
+
+  /// Format gate label cho dễ đọc.
+  /// "non_pest" → "non pest"
+  /// "tomato_leaf" → "tomato leaf"
+  String _formatGateLabel(String g) {
+    return g.replaceAll('_', ' ');
+  }
+}
+
+/// Một entry trong info block.
+class _InfoEntry {
+  const _InfoEntry(this.label, this.value);
+  final String label;
+  final String value;
+}
+
+/// Block hiển thị các thông tin AI dạng grid 2 cột (label | value).
+class _InfoBlock extends StatelessWidget {
+  const _InfoBlock({
+    required this.entries,
+    required this.tt,
+    required this.cs,
+  });
+
+  final List<_InfoEntry> entries;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: cs.surface.withAlpha(120),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: entries
+            .map((e) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 90,
+                        child: Text(
+                          e.label,
+                          style: tt.bodySmall?.copyWith(
+                            color: cs.onSurface.withAlpha(180),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          e.value,
+                          style: tt.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: cs.onSurface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ))
+            .toList(),
+      ),
+    );
+  }
+}
+
+enum _DiseaseSeverity {
+  none('Không có'),
+  low('Nhẹ'),
+  medium('Trung bình'),
+  high('Nghiêm trọng');
+
+  const _DiseaseSeverity(this.label);
+  final String label;
+}
+
+Color _getSeverityColor(_DiseaseSeverity severity) {
+  return switch (severity) {
+    _DiseaseSeverity.none => AppColors.success,
+    _DiseaseSeverity.low => AppColors.info,
+    _DiseaseSeverity.medium => AppColors.warning,
+    _DiseaseSeverity.high => AppColors.error,
+  };
+}
+
+/// Map finalStatus (từ API) sang tiếng Việt - dùng khi không có label cụ thể.
+String _mapFinalStatus(String? status) {
+  if (status == null) return 'Không xác định';
+  final lower = status.toLowerCase();
+
+  // ArgoPestOnnx statuses (phát hiện côn trùng/sâu)
+  if (lower == 'nopest' || lower == 'healthy' || lower == 'no_pest') {
+    return 'Không có sâu bệnh';
+  }
+  if (lower.contains('pest') || lower.contains('insect')) {
+    return 'Có côn trùng gây hại';
+  }
+
+  // TomatoLeafDiseaseOnnx statuses (phân loại bệnh lá cà chua)
+  if (lower == 'tomatoleafclassified') {
+    return 'Lá cà chua - đã phân loại';
+  }
+  if (lower.contains('nottomato') || lower.contains('nottomtoleaf')) {
+    return 'Không phải lá cà chua';
+  }
+
+  // Fallback: trả về nguyên gốc
+  return status;
+}
+
+/// Lấy severity từ finalStatus + label (label là nguồn chính xác nhất).
+_DiseaseSeverity _getSeverityFromStatus(String? status, String? label) {
+  // Ưu tiên label - đây là tên bệnh cụ thể từ AI
+  final source = (label ?? status ?? '').toLowerCase();
+
+  // Healthy / no pest → không có bệnh
+  if (source.contains('healthy') ||
+      source == 'nopest' ||
+      source == 'no_pest' ||
+      source == 'healthyplant') {
+    return _DiseaseSeverity.none;
+  }
+
+  // Bệnh nhẹ/trung bình
+  if (source.contains('early_blight') ||
+      source.contains('septoria') ||
+      source.contains('spider_mites') ||
+      source.contains('target_spot') ||
+      source.contains('leaf_mold') ||
+      source.contains('yellow') ||
+      source.contains('leaf_minor')) {
+    return _DiseaseSeverity.medium;
+  }
+
+  // Bệnh nặng/nguy hiểm
+  if (source.contains('late_blight') ||
+      source.contains('bacterial_spot') ||
+      source.contains('mosaic_virus') ||
+      source.contains('yellow_leaf_curl') ||
+      source.contains('pest') ||
+      source.contains('insect')) {
+    return _DiseaseSeverity.high;
+  }
+
+  // Fallback: nếu có label mà không match rule nào → trung bình
+  if (label != null && label.isNotEmpty) return _DiseaseSeverity.medium;
+  return _DiseaseSeverity.low;
+}
+
+/// Map label (tên bệnh từ AI) sang tiếng Việt có ý nghĩa.
+/// Đây là mapping CHÍNH - dùng để hiển thị tên bệnh cụ thể cho user.
+String _getVietnameseLabel(String? label) {
+  if (label == null || label.isEmpty) return '';
+  final trimmed = label.trim();
+
+  // Mapping đầy đủ cho Tomato diseases (theo PlantVillage dataset)
+  final map = <String, String>{
+    // ── Tomato Leaf Diseases ──
+    'Tomato_Late_blight': 'Bệnh mốc muộn (Late blight)',
+    'Tomato_Early_blight': 'Bệnh mốc sớm (Early blight)',
+    'Tomato_Healthy': 'Lá cà chua khỏe mạnh',
+    'Tomato_Septoria_leaf_spot': 'Bệnh đốm lá Septoria',
+    'Tomato_Spider_mites': 'Bệnh nhện đỏ (Spider mites)',
+    'Tomato_Bacterial_spot': 'Bệnh đốm vi khuẩn',
+    'Tomato_Target_spot': 'Bệnh đốm đích (Target spot)',
+    'Tomato_Leaf_Mold': 'Bệnh mốc lá (Leaf mold)',
+    'Tomato_Mosaic_virus': 'Bệnh khảm virus (Mosaic virus)',
+    'Tomato_Yellow_Leaf_Curl_Virus': 'Bệnh xoăn lá vàng (Yellow leaf curl)',
+    'Tomato_Leaf_Minor': 'Bệnh bướu lá (Leaf minor)',
+    'Tomato_Yellow': 'Lá vàng bất thường',
+    // ── ArgoPestOnnx labels ──
+    'NoPest': 'Không có sâu bệnh',
+    'Pest': 'Có côn trùng gây hại',
+    'Healthy': 'Cây khỏe mạnh',
+    'nopest': 'Không có sâu bệnh',
+    'pest': 'Có côn trùng gây hại',
+    'healthy': 'Cây khỏe mạnh',
+    'healthyplant': 'Cây khỏe mạnh',
+    'non_pest': 'Không có sâu bệnh',
+  };
+
+  // Tra cứu chính xác trước
+  if (map.containsKey(trimmed)) return map[trimmed]!;
+
+  // Tra cứu không phân biệt hoa/thường
+  for (final entry in map.entries) {
+    if (entry.key.toLowerCase() == trimmed.toLowerCase()) {
+      return entry.value;
+    }
+  }
+
+  // Fallback: làm sạch chuỗi gốc
+  var cleaned = trimmed;
+  for (final prefix in ['Tomato_', 'ArgoPest_']) {
+    if (cleaned.startsWith(prefix)) {
+      cleaned = cleaned.substring(prefix.length);
+    }
+  }
+  // Tách underscore → space, capitalize first letter
+  final parts = cleaned.split('_');
+  if (parts.length > 1) {
+    cleaned = parts
+        .map((p) => p.isEmpty ? '' : '${p[0].toUpperCase()}${p.substring(1).toLowerCase()}')
+        .join(' ');
+  }
+  return cleaned;
 }
 

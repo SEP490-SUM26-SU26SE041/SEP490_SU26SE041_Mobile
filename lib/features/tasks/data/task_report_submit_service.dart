@@ -123,6 +123,7 @@ class TaskReportSubmitService {
               caption: img.caption,
               capturedAt: img.uploadedAt,
               imageUrl: img.imageUrl,
+              aiProvider: img.aiProvider, // ← AI provider RIÊNG của ảnh này
             );
             return true;
           }
@@ -242,6 +243,7 @@ class TaskReportImageParam {
     this.imageUrl,
     this.caption,
     this.uploadedAt,
+    this.aiProvider,
   });
 
   /// File binary (multipart) nếu user vừa chụp/chọn.
@@ -252,6 +254,10 @@ class TaskReportImageParam {
 
   final String? caption;
   final DateTime? uploadedAt;
+
+  /// AI provider RIÊNG cho ảnh này (vd: 'TomatoLeafDiseaseOnnx').
+  /// Null/empty → BE không enqueue AI worker.
+  final String? aiProvider;
 }
 
 final taskReportSubmitServiceProvider =

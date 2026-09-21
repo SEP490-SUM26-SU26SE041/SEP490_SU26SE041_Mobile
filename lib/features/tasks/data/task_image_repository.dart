@@ -15,6 +15,7 @@ class TaskImageRepository {
   final TaskImageApiService _api;
 
   /// Upload file binary (multipart). Dùng cho ảnh mới chụp/chọn.
+  /// Truyền [aiProvider] để chỉ định AI provider cho ảnh (vd: 'TomatoLeafDiseaseOnnx').
   Future<TaskImageModel> uploadTaskImage({
     required String experimentId,
     required String batchId,
@@ -24,6 +25,7 @@ class TaskImageRepository {
     String? caption,
     DateTime? capturedAt,
     String? imageUrl,
+    String? aiProvider,
   }) {
     final dto = UploadTaskImageMultipartDto(
       file: imageFile,
@@ -34,9 +36,18 @@ class TaskImageRepository {
       imageUrl: imageUrl,
       caption: caption,
       capturedAt: capturedAt ?? DateTime.now(),
+      aiProvider: aiProvider,
     );
     return _api.uploadMultipart(dto);
   }
+
+  /// Lấy danh sách ảnh kèm aiAnalysis (cho modal xem kết quả AI).
+  Future<List<TaskImageModel>> getImagesByReportWithAnalysis(String reportId) =>
+      _api.getImagesByReportWithAnalysis(reportId);
+
+  /// Retry AI scan cho 1 ảnh (re-enqueue worker).
+  Future<TaskImageModel> retryAiScan(String imageId) =>
+      _api.retryAiScan(imageId);
 
   /// Anchor URL đã upload sẵn (Cloudinary) với report (JSON-only).
   Future<TaskImageModel> attachExistingImageUrl({

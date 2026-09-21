@@ -66,5 +66,15 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+
+	<!-- Permissions cho Image Picker (Camera + Gallery) -->
+	<key>NSCameraUsageDescription</key>
+	<string>Cần quyền truy cập Camera để chụp ảnh minh chứng cho báo cáo công việc.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Cần quyền truy cập thư viện ảnh để đính kèm ảnh minh chứng cho báo cáo.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Cần quyền lưu ảnh vào thư viện.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Cần quyền microphone để quay video minh chứng.</string>
 </dict>
 </plist>

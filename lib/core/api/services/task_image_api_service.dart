@@ -33,6 +33,8 @@ class TaskImageApiService {
   /// POST /task-images/upload — multipart với binary file.
   ///
   /// Dùng cho file mới chụp/chọn (chưa upload lên Cloudinary).
+  /// Truyền [aiProvider] để chỉ định AI provider cho ảnh này (vd: 'TomatoLeafDiseaseOnnx').
+  /// Nếu null/empty → BE không enqueue AI scan cho ảnh.
   Future<TaskImageModel> uploadMultipart(UploadTaskImageMultipartDto dto) async {
     final formData = FormData.fromMap({
       'file': await MultipartFile.fromFile(
@@ -46,6 +48,8 @@ class TaskImageApiService {
       if (dto.imageUrl != null) 'imageUrl': dto.imageUrl,
       if (dto.caption != null) 'caption': dto.caption,
       'capturedAt': dto.capturedAt.toIso8601String(),
+      if (dto.aiProvider != null && dto.aiProvider!.isNotEmpty)
+        'aiProvider': dto.aiProvider,
       if (dto.tags != null) 'tags': dto.tags,
       if (dto.exif != null) 'exif': dto.exif,
     });
@@ -68,6 +72,32 @@ class TaskImageApiService {
   Future<List<TaskImageModel>> getImagesByReport(String reportId) async {
     final res = await _dio.get('/task-images/report/$reportId');
     return _parseList(res);
+  }
+
+  /// GET /task-images/task/{reportId}/detail?includeAnalysis=true
+  ///
+  /// Trả về danh sách TaskImage kèm [AiAnalysisModel] đầy đủ.
+  Future<List<TaskImageModel>> getImagesByReportWithAnalysis(
+    String reportId,
+  ) async {
+    final res = await _dio.get(
+      '/task-images/task/$reportId/detail',
+      queryParameters: {'includeAnalysis': true},
+    );
+    return _parseList(res);
+  }
+
+  /// POST /task-images/{id}/retry — re-enqueue AI worker.
+  Future<TaskImageModel> retryAiScan(String imageId) async {
+    final res = await _dio.post('/task-images/$imageId/retry');
+    final data = res.data;
+    if (data is Map<String, dynamic> && data['data'] is Map<String, dynamic>) {
+      return TaskImageModel.fromJson(data['data'] as Map<String, dynamic>);
+    }
+    if (data is Map<String, dynamic>) {
+      return TaskImageModel.fromJson(data);
+    }
+    throw Exception('Unexpected retry response: $data');
   }
 
   Future<List<TaskImageModel>> getImagesByBatch(String batchId) async {
@@ -127,6 +157,7 @@ class UploadTaskImageMultipartDto {
     this.caption,
     this.tags,
     this.exif,
+    this.aiProvider,
   });
 
   final File file;
@@ -139,4 +170,7 @@ class UploadTaskImageMultipartDto {
   final String? caption;
   final String? tags;
   final String? exif;
+
+  /// AI provider cho ảnh này. Null/empty → BE không enqueue AI worker.
+  final String? aiProvider;
 }

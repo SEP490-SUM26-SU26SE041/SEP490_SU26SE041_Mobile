@@ -143,7 +143,7 @@ class _TasksScreenState extends ConsumerState<TasksScreen>
       backgroundColor: isDark ? AppColors.surfaceDark : AppColors.surfaceLight,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
-      actions: [
+        actions: [
         // Nút xem báo cáo - sẽ hiển thị danh sách task completed để xem báo cáo
         _HeaderActionButton(
           icon: Icons.assessment_rounded,
@@ -272,7 +272,7 @@ class _HeaderActionButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Container(
+          child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: AppColors.primary.withAlpha(15),
@@ -291,10 +291,10 @@ class _HeaderActionButton extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
     );
   }
 }
@@ -366,7 +366,7 @@ class _StatTile extends StatelessWidget {
         border: Border.all(color: color.withAlpha(40)),
       ),
       child: Column(
-        children: [
+            children: [
           Icon(icon, size: 20, color: color),
           const SizedBox(height: 4),
           Text('$count', style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: color)),
@@ -944,9 +944,9 @@ class PremiumTaskCard extends StatelessWidget {
         child: InkWell(
           onTap: () => _showDetail(context),
           borderRadius: BorderRadius.circular(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -955,30 +955,30 @@ class PremiumTaskCard extends StatelessWidget {
                     // ── HEADER: icon + title + status ──
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
+                  children: [
+                    Container(
                           width: 46, height: 46,
-                          decoration: BoxDecoration(
+                      decoration: BoxDecoration(
                             color: _statusColor.withAlpha(20),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: _statusColor.withAlpha(40)),
-                          ),
+                      ),
                           child: Icon(_typeIcon, size: 22, color: _statusColor),
-                        ),
+                    ),
                         const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                task.taskName,
-                                style: tt.titleMedium?.copyWith(
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            task.taskName,
+                            style: tt.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w700, color: textPrimary),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                               if (task.experimentTitle != null) ...[
-                                const SizedBox(height: 2),
+                          const SizedBox(height: 2),
                                 Row(
                                   children: [
                                     Icon(Icons.science_outlined,
@@ -987,15 +987,15 @@ class PremiumTaskCard extends StatelessWidget {
                                     Expanded(
                                       child: Text(
                                         task.experimentTitle!,
-                                        style: tt.bodySmall?.copyWith(
+                            style: tt.bodySmall?.copyWith(
                                             color: AppColors.primary.withAlpha(200),
                                             fontWeight: FontWeight.w500),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                            ),
+                          ),
+                        ],
+                      ),
                               ],
                             ],
                           ),
@@ -1019,7 +1019,7 @@ class PremiumTaskCard extends StatelessWidget {
                     // ── MÔ TẢ (preview) ──
                     if (task.description != null && task.description!.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      Text(
+                    Text(
                         task.description!,
                         style: tt.bodySmall?.copyWith(color: textSecondary, height: 1.4),
                         maxLines: 2,
@@ -1028,9 +1028,9 @@ class PremiumTaskCard extends StatelessWidget {
                     ],
                     const SizedBox(height: 14),
                     // ── THỜI HẠN (full date/time) ──
-                    Container(
+                      Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
+                        decoration: BoxDecoration(
                         color: _isOverdue
                             ? AppColors.error.withAlpha(10)
                             : (isDark ? AppColors.backgroundDark : AppColors.backgroundLight).withAlpha(180),
@@ -1040,9 +1040,9 @@ class PremiumTaskCard extends StatelessWidget {
                               ? AppColors.error.withAlpha(50)
                               : (isDark ? AppColors.borderDark : AppColors.borderLight).withAlpha(80),
                         ),
-                      ),
-                      child: Row(
-                        children: [
+                        ),
+                        child: Row(
+                          children: [
                           Icon(
                             _isOverdue ? Icons.warning_amber_rounded : Icons.event_rounded,
                             size: 16,
@@ -1053,23 +1053,23 @@ class PremiumTaskCard extends StatelessWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
+                            Text(
                                   _isOverdue ? 'Đã quá hạn' : 'Thời hạn',
-                                  style: tt.labelSmall?.copyWith(
+                              style: tt.labelSmall?.copyWith(
                                     color: _isOverdue ? AppColors.error : textSecondary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                                 const SizedBox(height: 2),
                                 Text(
                                   formatDueDate(task.dueDate),
                                   style: tt.titleSmall?.copyWith(
                                     color: _isOverdue ? AppColors.error : textPrimary,
                                     fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
+                          ],
+                        ),
                           ),
                           // Badge "Quá hạn X ngày" — CHỈ hiển thị khi overdue
                           if (overdueDays != null)
@@ -1123,9 +1123,9 @@ class PremiumTaskCard extends StatelessWidget {
                               icon: Icons.layers_outlined,
                               label: task.experimentStageName!,
                               color: AppColors.info,
-                            ),
-                        ],
-                      ),
+                ),
+              ],
+            ),
                     ],
                   ],
                 ),

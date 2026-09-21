@@ -1,6 +1,7 @@
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../core/api/models/task_report_model.dart';
 import '../../../core/api/services/task_image_api_service.dart';
 import '../data/task_image_repository.dart';
@@ -18,9 +19,25 @@ final taskImagesByReportProvider = FutureProvider.autoDispose
   return ref.read(taskImageRepositoryProvider).getImagesByReport(reportId);
 });
 
+// ─── Get images by report WITH AI analysis (cho AiResultModal) ──────────────
+
+final taskImagesByReportWithAnalysisProvider = FutureProvider.autoDispose
+    .family<List<TaskImageModel>, String>((ref, reportId) async {
+  return ref
+      .read(taskImageRepositoryProvider)
+      .getImagesByReportWithAnalysis(reportId);
+});
+
 // ─── Get images by batch ─────────────────────────────────────────────────
 
 final taskImagesByBatchProvider = FutureProvider.autoDispose
     .family<List<TaskImageModel>, String>((ref, batchId) async {
   return ref.read(taskImageRepositoryProvider).getImagesByBatch(batchId);
+});
+
+// ─── Retry AI scan ────────────────────────────────────────────────────────
+
+final retryAiScanProvider = FutureProvider.autoDispose
+    .family<TaskImageModel, String>((ref, imageId) async {
+  return ref.read(taskImageRepositoryProvider).retryAiScan(imageId);
 });
