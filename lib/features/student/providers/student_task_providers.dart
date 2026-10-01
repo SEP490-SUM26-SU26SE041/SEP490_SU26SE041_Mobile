@@ -43,12 +43,21 @@ internal.TaskType _taskType(api.TaskType t) {
 }
 
 internal.TaskStatus _taskStatus(api.TaskStatus s) {
+  // Mọi status "đóng" (task đã kết thúc vòng đời dù thành công hay thất bại)
+  // đều map về `completed` để:
+  //   - Hiển thị trong bucket "Hoàn thành".
+  //   - KHÔNG hiển thị badge "Quá hạn X ngày" dù dueDate đã trôi qua.
   return switch (s) {
     api.TaskStatus.pending    => internal.TaskStatus.pending,
     api.TaskStatus.inProgress => internal.TaskStatus.inProgress,
-    api.TaskStatus.completed => internal.TaskStatus.completed,
-    api.TaskStatus.approved  => internal.TaskStatus.completed,
-    api.TaskStatus.submitted  => internal.TaskStatus.completed,
-    _                        => internal.TaskStatus.overdue,
+    api.TaskStatus.completed ||
+    api.TaskStatus.approved ||
+    api.TaskStatus.submitted ||
+    api.TaskStatus.cancelled ||
+    api.TaskStatus.rejected ||
+    api.TaskStatus.resigned ||
+    api.TaskStatus.reassigned =>
+      internal.TaskStatus.completed,
+    api.TaskStatus.overdue => internal.TaskStatus.overdue,
   };
 }

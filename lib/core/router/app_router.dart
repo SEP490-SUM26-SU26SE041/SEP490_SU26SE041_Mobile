@@ -16,11 +16,9 @@ import 'package:flutter_application_2/features/notifications/presentation/notifi
 import 'package:flutter_application_2/features/ai_scan/presentation/ai_scan_screen.dart';
 import 'package:flutter_application_2/features/measurement/presentation/measurement_statistics_screen.dart';
 import 'package:flutter_application_2/features/measurement/presentation/growth_chart_screen.dart';
-import 'package:flutter_application_2/features/chat/presentation/chat_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/student_dashboard_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/student_tasks_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/growth_log_screen.dart';
-import 'package:flutter_application_2/features/student/presentation/student_chat_screen.dart';
 import 'package:flutter_application_2/features/student/presentation/student_task_detail_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_dashboard_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_growth_log_screen.dart';
@@ -28,15 +26,18 @@ import 'package:flutter_application_2/features/technician/presentation/technicia
 import 'package:flutter_application_2/features/technician/presentation/technician_report_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_iot_screen.dart';
 import 'package:flutter_application_2/features/technician/presentation/technician_task_detail_screen.dart';
-import 'package:flutter_application_2/features/technician/presentation/technician_chat_screen.dart';
+import 'package:flutter_application_2/features/rag/data/rag_models.dart';
+import 'package:flutter_application_2/features/rag/presentation/rag_chat_screen.dart';
 import 'package:flutter_application_2/core/theme/app_animation.dart';
 import 'package:flutter_application_2/shared/models/user_model.dart';
 
 String _initialRouteForRole(UserRole role) => switch (role) {
-  UserRole.researcher => '/student/dashboard', // Researcher disabled temporarily
-  UserRole.student   => '/student/dashboard',
-  UserRole.technician => '/tech/dashboard',
-};
+      // Researcher không được hỗ trợ trên mobile hiện tại
+      // → chỉ Student + Technician là 2 role được phục vụ.
+      UserRole.researcher => '/login',
+      UserRole.student   => '/student/dashboard',
+      UserRole.technician => '/tech/dashboard',
+    };
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -49,6 +50,20 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isIntroRoute  = state.matchedLocation == '/intro';
       final isLoginRoute  = state.matchedLocation == '/login';
       if (isSplashRoute || isIntroRoute) return null;
+
+      // Researcher role: tự động logout + redirect về login.
+      // (Mobile hiện chỉ phục vụ Student + Technician.)
+      if (isLoggedIn && authState.user.role == UserRole.researcher) {
+        // Fire-and-forget logout (UI sẽ reactive theo authState).
+        Future.microtask(() {
+          try {
+            // ignore: invalid_use_of_protected_member, prefer using ref.read
+            (ref.read(authProvider.notifier)).logout();
+          } catch (_) {}
+        });
+        return '/login';
+      }
+
       if (!isLoggedIn && !isLoginRoute) return '/splash';
       if (isLoggedIn && isLoginRoute) {
         final role = authState.user.role;
@@ -198,7 +213,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: '/chat',
             pageBuilder: (context, state) => CustomTransitionPage(
               key: state.pageKey,
-              child: const ChatScreen(),
+              child: Scaffold(
+                body: MainShell(child: RagChatScreen(scope: RagScope.student)),
+              ),
               transitionsBuilder: _slideTransition,
               transitionDuration: AppDuration.page,
             ),
@@ -304,8 +321,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/student/chat',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(
-            body: MainShell(child: StudentChatScreen()),
+          child: Scaffold(
+            body: MainShell(child: RagChatScreen(scope: RagScope.student)),
           ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,
@@ -361,8 +378,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tech/chat',
         pageBuilder: (context, state) => CustomTransitionPage(
           key: state.pageKey,
-          child: const Scaffold(
-            body: MainShell(child: TechnicianChatScreen()),
+          child: Scaffold(
+            body: MainShell(child: RagChatScreen(scope: RagScope.technician)),
           ),
           transitionsBuilder: _slideTransition,
           transitionDuration: AppDuration.page,

@@ -25,22 +25,39 @@ final upcomingTasksApiProvider =
 });
 
 /// `GET /tasks/overdue` — đúng những gì backend trả về.
+///
+/// Defensive: lọc thêm task chưa hoàn thành (Completed / Approved / Submitted)
+/// để tránh hiển thị "Quá hạn X ngày" cho task đã xong từ quá khứ.
 final overdueTasksApiProvider =
     FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
   try {
-    return await ref.read(taskRepoProvider).getOverdueTasks();
+    final list = await ref.read(taskRepoProvider).getOverdueTasks();
+    return list.where((t) {
+      if (t.status == api.TaskStatus.cancelled) return false;
+      // Loại task đã đóng (Completed / Approved / Submitted) dù dueDate cũ.
+      if (t.status == api.TaskStatus.completed ||
+          t.status == api.TaskStatus.approved ||
+          t.status == api.TaskStatus.submitted) {
+        return false;
+      }
+      return true;
+    }).toList();
   } catch (_) {
     return <api.TaskModel>[];
   }
 });
 
 /// `GET /tasks/my?status=Completed|Approved|Submitted` — đúng những gì backend trả về.
+///
+/// Defensive: lọc thêm task đã có dueDate cũ nhưng status "Approved" / "Submitted"
+/// (BE đôi khi set status này cho task đã xong từ quá khứ).
 final completedTasksApiProvider =
     FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
   try {
-    return await ref.read(taskRepoProvider).getMyTasks(
+    final list = await ref.read(taskRepoProvider).getMyTasks(
           status: const ['Completed', 'Approved', 'Submitted'],
         );
+    return list.where((t) => t.status != api.TaskStatus.cancelled).toList();
   } catch (_) {
     return <api.TaskModel>[];
   }

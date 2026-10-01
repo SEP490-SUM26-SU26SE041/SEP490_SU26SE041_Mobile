@@ -156,20 +156,40 @@ class DeadlineChipData {
   final bool isOverdue;
 }
 
+/// Deadline chip cho task card.
+///
+/// Quy tắc hiển thị "Quá hạn X ngày" (theo rule user):
+/// - CHỈ hiển thị khi `task.status == Overdue` VÀ `!hasReport`.
+/// - Mọi case khác (Completed with/without report, InProgress past due,
+///   Approved, Submitted, …) đều KHÔNG hiển thị overdue badge, dù dueDate
+///   đã qua. Lý do: backend đã đánh dấu `status=Overdue` cho task quá hạn
+///   chưa hoàn thành, và `hasReport` đồng nghĩa task coi như đã xong.
 DeadlineChipData? computeDeadlineChip(
   DateTime? dueDate,
-  api.TaskStatus status,
-) {
+  api.TaskStatus status, {
+  bool hasReport = false,
+}) {
   if (dueDate == null) return null;
+  // Task đã đóng (Completed / Approved / Submitted / Cancelled / Rejected /
+  // Resigned / Reassigned) → không bao giờ hiện deadline chip quá hạn.
   if (status == api.TaskStatus.completed ||
       status == api.TaskStatus.approved ||
-      status == api.TaskStatus.submitted) {
+      status == api.TaskStatus.submitted ||
+      status == api.TaskStatus.cancelled ||
+      status == api.TaskStatus.rejected ||
+      status == api.TaskStatus.resigned ||
+      status == api.TaskStatus.reassigned) {
     return null;
   }
   final today = todayInVN();
   final dueVN = dateOnlyInVN(dueDate);
   final diff = dueVN.difference(today).inDays;
-  if (diff < 0) {
+  // Hiển thị "Quá hạn X ngày" CHỈ khi:
+  //   status == Overdue  &&  !hasReport
+  // Trường hợp InProgress quá hạn nhưng status chưa được backend cập nhật
+  // thành Overdue → vẫn hiển thị ngày bình thường (không phải overdue chip).
+  final isOverdueChip = status == api.TaskStatus.overdue && !hasReport;
+  if (diff < 0 && isOverdueChip) {
     final days = diff.abs();
     return DeadlineChipData(
       label: days == 0 ? 'Quá hạn hôm nay' : 'Quá hạn $days ngày',
@@ -299,6 +319,13 @@ List<api.TaskModel> applyBucketFilter(
 }
 
 /// Group by date label (Hôm nay / Ngày mai / dd/MM) theo UTC+7.
+///
+/// Quy ước label:
+///   - `diff = 0` → "Hôm nay"
+///   - `diff = 1` → "Ngày mai"
+///   - còn lại → "dd/MM" (hoặc "dd/MM/yyyy" nếu khác năm hiện tại)
+///   - không kèm thứ trong tuần (vd "Friday") vì sẽ gây rối khi xem task
+///     nhiều tuần — user không biết task đó thuộc tuần nào.
 Map<String, List<api.TaskModel>> groupTasksByDate(List<api.TaskModel> tasks) {
   final map = <String, List<api.TaskModel>>{};
   for (final t in tasks) {
@@ -306,13 +333,13 @@ Map<String, List<api.TaskModel>> groupTasksByDate(List<api.TaskModel> tasks) {
     final today = todayInVN();
     final dueDate = dateOnlyInVN(due);
     final diff = dueDate.difference(today).inDays;
+    final dd = dueDate.day.toString().padLeft(2, '0');
+    final mm = dueDate.month.toString().padLeft(2, '0');
     final key = switch (diff) {
       0 => 'Hôm nay',
       1 => 'Ngày mai',
-      -1 => 'Hôm qua',
-      _ when diff < 0 => 'Quá hạn (${diff.abs()} ngày trước)',
-      _ when diff <= 7 => intl.DateFormat('EEEE').format(dueDate),
-      _ => intl.DateFormat('dd/MM/yyyy').format(dueDate),
+      _ when dueDate.year == today.year => '$dd/$mm',
+      _ => '$dd/$mm/${dueDate.year}',
     };
     map.putIfAbsent(key, () => []).add(t);
   }
@@ -320,23 +347,94 @@ Map<String, List<api.TaskModel>> groupTasksByDate(List<api.TaskModel> tasks) {
 }
 
 /// Sort thứ tự ổn định — gom nhóm theo date label và sắp theo thời gian trong nhóm.
-List<MapEntry<String, List<api.TaskModel>>> sortedGroups(Map<String, List<api.TaskModel>> groups) {
-  final order = {'Hôm nay': 0, 'Ngày mai': 1, 'Hôm qua': -1};
+///
+/// **Quan trọng**: Sắp xếp theo `DateTime` thực tế (year, month, day), không
+/// phải so sánh chuỗi `dd/MM`. Vì `dd/MM` so theo chuỗi sẽ sai khi qua tháng
+/// (vd `02/10` < `27/09` do `'0' < '2'`, dù `02/10` mới hơn).
+///
+/// **Thứ tự**: mới → cũ (descending) — ngày càng gần hiện tại thì ở trên cùng,
+/// ngày càng xa (quá khứ) thì xuống dưới. Bucket đặc biệt:
+///
+/// - "Hôm nay" đứng đầu (priority 1000)
+/// - "Ngày mai" đứng thứ 2 (priority 999)
+/// - "Hôm qua" đứng cuối cùng trước "Hoàn thành" (priority -1000)
+/// - `completedGroupKey` đứng cuối cùng (priority -2000)
+List<MapEntry<String, List<api.TaskModel>>> sortedGroups(
+  Map<String, List<api.TaskModel>> groups, {
+  String? completedGroupKey,
+}) {
+  // Priority cao → đứng trên. Mặc định "Hoàn thành" đứng cuối.
+  final order = <String, int>{
+    'Hôm nay': 1000,
+    'Ngày mai': 999,
+  };
+  // Các key ngày đã sort descending theo DateTime → cộng thêm priority
+  // để đảm bảo "Hôm nay"/"Ngày mai" luôn trên cùng, ngày quá khứ giảm dần.
+  if (completedGroupKey != null) {
+    order[completedGroupKey] = -2000;
+  }
+  // "Hôm qua" đứng sát dưới các ngày quá khứ (vì gần hiện tại nhất trong
+  // past), nhưng vẫn trên "Hoàn thành".
+  order['Hôm qua'] = -1000;
+
   final entries = groups.entries.toList();
+
+  /// Resolve label → DateTime để so sánh tuyệt đối (mới → cũ → hoàn thành).
+  /// - "Hôm nay"/"Ngày mai"/"Hôm qua" dùng anchor là hôm nay theo VN.
+  /// - "dd/MM" → dùng năm hiện tại, parse theo `dd/MM`.
+  /// - "dd/MM/yyyy" → parse đầy đủ.
+  DateTime? resolveKey(String label) {
+    final today = todayInVN();
+    switch (label) {
+      case 'Hôm nay':
+        return DateTime.utc(today.year, today.month, today.day);
+      case 'Ngày mai':
+        return DateTime.utc(today.year, today.month, today.day + 1);
+      case 'Hôm qua':
+        return DateTime.utc(today.year, today.month, today.day - 1);
+    }
+    // dd/MM hoặc dd/MM/yyyy
+    final parts = label.split('/');
+    if (parts.length == 2) {
+      final d = int.tryParse(parts[0]);
+      final m = int.tryParse(parts[1]);
+      if (d != null && m != null) {
+        return DateTime.utc(today.year, m, d);
+      }
+    } else if (parts.length == 3) {
+      final d = int.tryParse(parts[0]);
+      final m = int.tryParse(parts[1]);
+      final y = int.tryParse(parts[2]);
+      if (d != null && m != null && y != null) {
+        return DateTime.utc(y, m, d);
+      }
+    }
+    return null;
+  }
+
   entries.sort((a, b) {
     final oa = order[a.key];
     final ob = order[b.key];
-    if (oa != null || ob != null) {
-      if (oa == null) return 1;
-      if (ob == null) return -1;
-      return oa.compareTo(ob);
+    // Cả 2 cùng có priority → so sánh priority (desc).
+    if (oa != null && ob != null) return ob.compareTo(oa);
+
+    // Một key đặc biệt, một key ngày → key đặc biệt ưu tiên.
+    if (oa != null) return -1; // a đặc biệt (Hôm nay/Ngày mai) → lên trên
+    if (ob != null) return 1; // b đặc biệt → b lên trên
+
+    // Cả 2 cùng là label ngày → so sánh theo DateTime thực tế (descending).
+    final da = resolveKey(a.key);
+    final db = resolveKey(b.key);
+    if (da != null && db != null) {
+      return db.compareTo(da); // descending: mới → cũ
     }
+    // Fallback — so sánh chuỗi (ít xảy ra).
     return a.key.compareTo(b.key);
   });
+
   for (final entry in entries) {
-    entry.value.sort((a, b) {
-      return a.dueDate.compareTo(b.dueDate);
-    });
+    // Trong mỗi section, sort task theo dueDate cũ → mới (sáng → tối).
+    entry.value.sort((a, b) => a.dueDate.compareTo(b.dueDate));
   }
   return entries;
 }

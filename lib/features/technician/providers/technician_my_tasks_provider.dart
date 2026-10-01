@@ -40,10 +40,22 @@ final technicianUpcomingTasksApiProvider =
 });
 
 /// `GET /tasks/overdue` — tasks quá hạn.
+///
+/// Defensive: lọc thêm task chưa hoàn thành (Completed / Approved / Submitted)
+/// để tránh hiển thị "Quá hạn X ngày" cho task đã xong từ quá khứ.
 final technicianOverdueTasksApiProvider =
     FutureProvider.autoDispose<List<api.TaskModel>>((ref) async {
   try {
-    return await ref.read(taskRepoProvider).getOverdueTasks();
+    final list = await ref.read(taskRepoProvider).getOverdueTasks();
+    return list.where((t) {
+      if (t.status == api.TaskStatus.cancelled) return false;
+      if (t.status == api.TaskStatus.completed ||
+          t.status == api.TaskStatus.approved ||
+          t.status == api.TaskStatus.submitted) {
+        return false;
+      }
+      return true;
+    }).toList();
   } catch (_) {
     return <api.TaskModel>[];
   }

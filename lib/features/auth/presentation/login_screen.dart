@@ -97,9 +97,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         final role = authState.user.role;
+        // Researcher không được hỗ trợ trên mobile (chỉ phục vụ Student + Technician).
+        // Nếu login thành công với role Researcher → tự động logout và về lại login.
+        if (role == UserRole.researcher) {
+          ref.read(authProvider.notifier).logout();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  '⚠️ Tài khoản Researcher hiện không được hỗ trợ trên mobile. '
+                  'Vui lòng dùng web để truy cập.',
+                ),
+                duration: Duration(seconds: 4),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+          return;
+        }
         final dashboard = switch (role) {
-          // Researcher disabled temporarily - redirect to student
-          UserRole.researcher => '/student/dashboard',
+          UserRole.researcher => '/student/dashboard', // không xảy ra (đã return trên)
           UserRole.student => '/student/dashboard',
           UserRole.technician => '/tech/dashboard',
         };

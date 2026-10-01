@@ -172,7 +172,12 @@ class _AiResultModalState extends ConsumerState<AiResultModal> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       insetPadding: const EdgeInsets.all(12),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 700),
+        // Cap theo kích thước màn hình thay vì hardcode 700, tránh
+        // RenderFlex overflow trên màn hình nhỏ (laptop 13" ~660px, tablet).
+        constraints: BoxConstraints(
+          maxWidth: 480,
+          maxHeight: MediaQuery.of(context).size.height * 0.9,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -299,7 +304,12 @@ class _AiResultModalState extends ConsumerState<AiResultModal> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        constraints: const BoxConstraints(maxHeight: 280),
+        // Ảnh preview scale theo chiều cao màn hình, tránh overflow trên
+        // laptop/màn hình nhỏ. Trước đây cap 280 cứng → modal trên màn hình
+        // ~660px sẽ vỡ layout.
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.35,
+        ),
         width: double.infinity,
         color: cs.surfaceContainerHighest,
         child: previewUrl.isEmpty

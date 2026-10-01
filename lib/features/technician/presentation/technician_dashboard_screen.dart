@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/models/dashboard_model.dart';
-import '../../../core/api/models/task_model.dart' as taskApi;
+import '../../../core/api/models/task_model.dart' as task_model_api;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_utils.dart';
@@ -15,6 +15,7 @@ import '../../../shared/widgets/profile_button.dart';
 import '../../../shared/widgets/snms_card.dart';
 import '../../dashboard/providers/role_dashboard_providers.dart';
 import '../../notifications/providers/notification_providers.dart';
+import '../../tasks/presentation/widgets/task_report_detail_sheet.dart';
 import '../providers/technician_my_tasks_provider.dart';
 import '../providers/technician_task_providers.dart';
 
@@ -94,10 +95,24 @@ class TechnicianDashboardScreen extends ConsumerWidget {
                         const SizedBox(height: AppSpacing.xl),
                         _buildAlerts(context, alertsAsync, unread),
                         const SizedBox(height: AppSpacing.xl),
-                        _buildSectionHeader('Hình ảnh cây gần đây',
-                            Icons.eco_rounded, AppColors.success),
+                        const GradientHeader(
+                          title: 'Báo cáo gần đây',
+                          subtitle: 'Cập nhật từ Student & Technician (kèm ảnh)',
+                          leading:
+                              Icon(Icons.assignment_rounded, color: Colors.white, size: 18),
+                        ),
                         const SizedBox(height: AppSpacing.md),
-                        const PlantPhotoGallery(maxPhotos: 5),
+                        PlantPhotoGallery(
+                          maxPhotos: 5,
+                          images: ref
+                              .watch(dashboardRecentImagesProvider)
+                              .maybeWhen(
+                                data: (l) => l,
+                                orElse: () => const <TaskImageItem>[],
+                              ),
+                          onImageTap: (image) =>
+                              _onPlantImageTap(context, image),
+                        ),
                         const SizedBox(height: AppSpacing.xl),
                         _buildSectionHeader('Công việc hôm nay',
                             Icons.assignment_rounded, AppColors.primary),
@@ -113,6 +128,20 @@ class TechnicianDashboardScreen extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+
+  /// Tap vào ảnh "Báo cáo gần đây" → mở bottom sheet báo cáo công việc.
+  ///
+  /// Đồng bộ với UX student dashboard & nút "Xem báo cáo" trong task
+  /// detail — tránh điều hướng sang trang khác và modal AI phức tạp.
+  void _onPlantImageTap(BuildContext context, TaskImageItem image) {
+    final taskId = image.taskId;
+    if (taskId == null || taskId.isEmpty) return;
+    TaskReportDetailSheet.show(
+      context,
+      taskId: taskId,
+      taskName: image.taskTitle ?? image.caption ?? 'Báo cáo công việc',
     );
   }
 
@@ -505,26 +534,26 @@ class _KPICard extends StatelessWidget {
 
 class _TaskRow extends StatelessWidget {
   const _TaskRow({required this.task, required this.tt, required this.cs});
-  final taskApi.TaskModel task;
+  final task_model_api.TaskModel task;
   final TextTheme tt;
   final ColorScheme cs;
 
   Color get _statusColor => switch (task.status) {
-        taskApi.TaskStatus.pending => AppColors.warning,
-        taskApi.TaskStatus.inProgress => AppColors.primary,
-        taskApi.TaskStatus.completed => AppColors.success,
+        task_model_api.TaskStatus.pending => AppColors.warning,
+        task_model_api.TaskStatus.inProgress => AppColors.primary,
+        task_model_api.TaskStatus.completed => AppColors.success,
         _ => AppColors.error,
       };
 
   IconData get _icon => switch (task.taskType) {
-        taskApi.TaskType.planting => Icons.eco_rounded,
-        taskApi.TaskType.watering => Icons.water_drop_rounded,
-        taskApi.TaskType.fertilizing => Icons.science_rounded,
-        taskApi.TaskType.observation => Icons.visibility_rounded,
-        taskApi.TaskType.inspection => Icons.search_rounded,
-        taskApi.TaskType.measurement => Icons.straighten_rounded,
-        taskApi.TaskType.harvest => Icons.agriculture_rounded,
-        taskApi.TaskType.other => Icons.more_horiz_rounded,
+        task_model_api.TaskType.planting => Icons.eco_rounded,
+        task_model_api.TaskType.watering => Icons.water_drop_rounded,
+        task_model_api.TaskType.fertilizing => Icons.science_rounded,
+        task_model_api.TaskType.observation => Icons.visibility_rounded,
+        task_model_api.TaskType.inspection => Icons.search_rounded,
+        task_model_api.TaskType.measurement => Icons.straighten_rounded,
+        task_model_api.TaskType.harvest => Icons.agriculture_rounded,
+        task_model_api.TaskType.other => Icons.more_horiz_rounded,
       };
 
   @override

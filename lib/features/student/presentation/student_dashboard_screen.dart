@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/models/dashboard_model.dart';
-import '../../../core/api/models/task_model.dart' as taskApi;
+import '../../../core/api/models/task_model.dart' as task_model_api;
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_utils.dart';
@@ -15,6 +15,7 @@ import '../../../shared/widgets/profile_button.dart';
 import '../../../shared/widgets/snms_card.dart';
 import '../../dashboard/providers/role_dashboard_providers.dart';
 import '../../notifications/providers/notification_providers.dart';
+import '../../tasks/presentation/widgets/task_report_detail_sheet.dart';
 import '../../tasks/presentation/widgets/task_visual.dart';
 import '../../tasks/providers/my_tasks_provider.dart';
 import 'growth_log_screen.dart' show growthRecordsProvider;
@@ -99,16 +100,18 @@ class StudentDashboardScreen extends ConsumerWidget {
                       unreadAsync: unreadAsync),
                   const SizedBox(height: AppSpacing.xl),
                   GradientHeader(
-                    title: 'Hình ảnh cây gần đây',
-                    subtitle: 'Cập nhật từ Student & Technician',
-                    leading: const Icon(Icons.eco_rounded, color: Colors.white, size: 18),
+                    title: 'Báo cáo gần đây',
+                    subtitle: 'Cập nhật từ Student & Technician (kèm ảnh)',
+                    leading: const Icon(Icons.assignment_rounded, color: Colors.white, size: 18),
                   ),
                   const SizedBox(height: AppSpacing.md),
                   PlantPhotoGallery(
-                    images: overview.maybeWhen(
-                      data: (o) => o.recentImages,
-                      orElse: () => const [],
-                    ),
+                    images: ref
+                        .watch(dashboardRecentImagesProvider)
+                        .maybeWhen(
+                          data: (l) => l,
+                          orElse: () => const <TaskImageItem>[],
+                        ),
                     maxPhotos: 5,
                     onImageTap: (image) => _onImageTap(context, image),
                   ),
@@ -132,9 +135,16 @@ class StudentDashboardScreen extends ConsumerWidget {
   }
 
   void _onImageTap(BuildContext context, TaskImageItem image) {
-    if (image.taskId != null && image.taskId!.isNotEmpty) {
-      context.push('/tasks/${image.taskId}');
-    }
+    // Bấm ảnh → mở bottom sheet "Báo cáo công việc" (giống UX nút
+    // "Xem báo cáo" trong task detail). Tránh điều hướng sang trang
+    // khác và tránh modal AI phức tạp.
+    final taskId = image.taskId;
+    if (taskId == null || taskId.isEmpty) return;
+    TaskReportDetailSheet.show(
+      context,
+      taskId: taskId,
+      taskName: image.taskTitle ?? image.caption ?? 'Báo cáo công việc',
+    );
   }
 }
 
@@ -468,7 +478,7 @@ class _AlertCard extends StatelessWidget {
 class _TodayTasksSection extends StatelessWidget {
   const _TodayTasksSection({required this.context, required this.today});
   final BuildContext context;
-  final List<taskApi.TaskModel> today;
+  final List<task_model_api.TaskModel> today;
 
   @override
   Widget build(BuildContext _) {
@@ -528,7 +538,7 @@ class _TodayTasksSection extends StatelessWidget {
 class _UpcomingTasksSection extends StatelessWidget {
   const _UpcomingTasksSection({required this.context, required this.upcoming});
   final BuildContext context;
-  final List<taskApi.TaskModel> upcoming;
+  final List<task_model_api.TaskModel> upcoming;
 
   @override
   Widget build(BuildContext _) {
@@ -575,26 +585,26 @@ class _UpcomingTasksSection extends StatelessWidget {
 
 class _TaskRow extends StatelessWidget {
   const _TaskRow({required this.task, required this.tt, required this.cs});
-  final taskApi.TaskModel task;
+  final task_model_api.TaskModel task;
   final TextTheme tt;
   final ColorScheme cs;
 
   Color get _statusColor => switch (task.status) {
-        taskApi.TaskStatus.pending => AppColors.warning,
-        taskApi.TaskStatus.inProgress => AppColors.primary,
-        taskApi.TaskStatus.completed => AppColors.success,
+        task_model_api.TaskStatus.pending => AppColors.warning,
+        task_model_api.TaskStatus.inProgress => AppColors.primary,
+        task_model_api.TaskStatus.completed => AppColors.success,
         _ => AppColors.error,
       };
 
   IconData get _icon => switch (task.taskType) {
-        taskApi.TaskType.planting => Icons.eco_rounded,
-        taskApi.TaskType.watering => Icons.water_drop_rounded,
-        taskApi.TaskType.fertilizing => Icons.science_rounded,
-        taskApi.TaskType.observation => Icons.visibility_rounded,
-        taskApi.TaskType.inspection => Icons.search_rounded,
-        taskApi.TaskType.harvest => Icons.agriculture_rounded,
-        taskApi.TaskType.measurement => Icons.straighten_rounded,
-        taskApi.TaskType.other => Icons.more_horiz_rounded,
+        task_model_api.TaskType.planting => Icons.eco_rounded,
+        task_model_api.TaskType.watering => Icons.water_drop_rounded,
+        task_model_api.TaskType.fertilizing => Icons.science_rounded,
+        task_model_api.TaskType.observation => Icons.visibility_rounded,
+        task_model_api.TaskType.inspection => Icons.search_rounded,
+        task_model_api.TaskType.harvest => Icons.agriculture_rounded,
+        task_model_api.TaskType.measurement => Icons.straighten_rounded,
+        task_model_api.TaskType.other => Icons.more_horiz_rounded,
       };
 
   @override

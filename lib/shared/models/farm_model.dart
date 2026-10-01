@@ -169,8 +169,8 @@ class FarmModel {
   int get availableBeds => areas.fold(0, (sum, a) => sum + a.availableBeds);
 
   String get statusLabel => switch (status) {
-    LocationStatus.available  => 'Active',
-    LocationStatus.inUse    => 'In Use',
-    LocationStatus.maintenance => 'Maintenance',
+    LocationStatus.available  => 'Đang hoạt động',
+    LocationStatus.inUse    => 'Đang sử dụng',
+    LocationStatus.maintenance => 'Bảo trì',
   };
 }

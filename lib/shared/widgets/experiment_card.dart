@@ -40,12 +40,12 @@ class ExperimentCard extends StatefulWidget {
   };
 
   String get _statusLabel => switch (status) {
-    ExperimentStatus.active    => 'Active',
-    ExperimentStatus.planning  => 'Planning',
-    ExperimentStatus.completed => 'Completed',
-    ExperimentStatus.paused    => 'Paused',
-    ExperimentStatus.draft     => 'Draft',
-    ExperimentStatus.pending   => 'Pending',
+    ExperimentStatus.active    => 'Đang chạy',
+    ExperimentStatus.planning  => 'Đang lên kế hoạch',
+    ExperimentStatus.completed => 'Hoàn thành',
+    ExperimentStatus.paused    => 'Tạm dừng',
+    ExperimentStatus.draft     => 'Bản nháp',
+    ExperimentStatus.pending   => 'Chờ duyệt',
   };
 
   @override

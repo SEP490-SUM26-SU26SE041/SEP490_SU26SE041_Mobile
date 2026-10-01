@@ -740,21 +740,10 @@ class _ImageTile extends ConsumerWidget {
   TaskImageModel get image => img.model;
 
   void _openAiModal(BuildContext context) {
-    if (image.aiProvider == null) {
-      // Không có AI provider → mở full screen
-      _openFullScreen(context);
-      return;
-    }
-    showAiResultModal(
-      context,
-      image: image,
-      taskReportId: taskReportId,
-      onImageUpdated: (_) {
-        // Refresh parent qua invalidation
-        // ignore: unused_result
-        // (consumer reloads via Riverpod)
-      },
-    );
+    // Theo yêu cầu UX: bấm ảnh trong task detail mở full-screen viewer
+    // (không mở AI modal — vì modal trên màn hình nhỏ bị RenderFlex overflow
+    // và cũng không cần thiết phải poll AI ngay tại thumbnail).
+    _openFullScreen(context);
   }
 
   void _openFullScreen(BuildContext context) {

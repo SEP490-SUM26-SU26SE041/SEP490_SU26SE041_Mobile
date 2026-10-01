@@ -16,13 +16,15 @@ class MainShell extends ConsumerWidget {
   // Notify removed across all roles (per design).
   List<String> _routesForRole(UserRole role) {
     switch (role) {
+      // Researcher không được hỗ trợ trên mobile — fallback về student routes.
+      // Router đã tự động logout researcher về /login nên thường không vào đây.
       case UserRole.researcher:
-        return [
-          '/dashboard',
-          '/experiments',
-          '/tasks',
+        return const [
+          '/student/dashboard',
+          '/student/tasks',
           '/ai-scan',
-          '/chat',
+          '/student/growth',
+          '/student/chat',
         ];
       case UserRole.student:
         return [
@@ -36,7 +38,6 @@ class MainShell extends ConsumerWidget {
         return [
           '/tech/dashboard',
           '/tech/tasks',
-          '/tech/iot',
           '/ai-scan',
           '/tech/chat',
         ];
@@ -61,7 +62,8 @@ class MainShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentUser = ref.watch(currentUserProvider);
-    final role = currentUser?.role ?? UserRole.researcher;
+    // Default: Student (Researcher không được hỗ trợ trên mobile)
+    final role = currentUser?.role ?? UserRole.student;
     final location = GoRouterState.of(context).matchedLocation;
     final selectedIndex = _getIndexFromLocation(location, role);
 

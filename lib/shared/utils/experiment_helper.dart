@@ -18,9 +18,9 @@ class ExperimentHelper {
   static String getStageStatusLabel(StageStatus? status) {
     if (status == null) return '—';
     return switch (status) {
-      StageStatus.active => 'Active',
-      StageStatus.completed => 'Completed',
-      StageStatus.upcoming => 'Upcoming',
+      StageStatus.active => 'Đang chạy',
+      StageStatus.completed => 'Hoàn thành',
+      StageStatus.upcoming => 'Sắp tới',
     };
   }
 

@@ -14,6 +14,49 @@ final taskHubBucketProvider = StateProvider<TaskFilterBucket>((ref) {
   return TaskFilterBucket.today;
 });
 
+/// Khoảng ngày cho bucket "Tất cả" — lọc các task theo cửa sổ thời gian.
+enum TaskDateRange {
+  all('Tất cả'),
+  today('Hôm nay'),
+  last7('7 ngày'),
+  last30('30 ngày'),
+  thisMonth('Tháng này');
+
+  const TaskDateRange(this.label);
+  final String label;
+}
+
+/// State provider cho date range filter — mặc định "Tất cả".
+final taskHubDateRangeProvider = StateProvider<TaskDateRange>((ref) {
+  return TaskDateRange.all;
+});
+
+/// Lọc danh sách tasks theo `TaskDateRange` — so với `dueDate` theo UTC+7.
+List<api.TaskModel> filterByDateRange(
+  List<api.TaskModel> tasks,
+  TaskDateRange range,
+) {
+  if (range == TaskDateRange.all) return tasks;
+  final today = dateOnlyInVN(DateTime.now().toUtc());
+  return tasks.where((t) {
+    final due = dateOnlyInVN(t.dueDate);
+    switch (range) {
+      case TaskDateRange.today:
+        return due == today;
+      case TaskDateRange.last7:
+        final diff = due.difference(today).inDays;
+        return diff >= -7 && diff <= 7;
+      case TaskDateRange.last30:
+        final diff = due.difference(today).inDays;
+        return diff >= -30 && diff <= 30;
+      case TaskDateRange.thisMonth:
+        return due.year == today.year && due.month == today.month;
+      case TaskDateRange.all:
+        return true;
+    }
+  }).toList();
+}
+
 /// Số task đã báo cáo theo từng taskId. Riverpod autoDispose.
 final taskHubReportedByTaskProvider = FutureProvider.autoDispose<
     Map<String, int>>((ref) async {
@@ -68,6 +111,7 @@ class TaskHub extends ConsumerWidget {
           data: (s) => s,
           orElse: () => <String>{},
         );
+    final dateRange = ref.watch(taskHubDateRangeProvider);
 
     // Lấy danh sách task cho bucket đang chọn — KHỚP với API trả về (1-1).
     List<api.TaskModel> filtered;
@@ -98,6 +142,12 @@ class TaskHub extends ConsumerWidget {
         }
         break;
     }
+    // Khi bucket là "all" và dateRange khác "all" → lọc thêm theo ngày.
+    final isFilteredByRange =
+        bucket == TaskFilterBucket.all && dateRange != TaskDateRange.all;
+    if (isFilteredByRange) {
+      filtered = filterByDateRange(filtered, dateRange);
+    }
     final counts = <TaskFilterBucket, int>{
       TaskFilterBucket.today: buckets.today.length,
       TaskFilterBucket.upcoming: buckets.upcoming.length,
@@ -105,7 +155,11 @@ class TaskHub extends ConsumerWidget {
       TaskFilterBucket.completed: buckets.completed.length,
       TaskFilterBucket.all: filtered.length,
     };
-    final grouped = sortedGroups(groupTasksByDate(filtered));
+    // Sort descending: ngày mới → cũ. "Hoàn thành" đứng cuối.
+    final grouped = sortedGroups(
+      groupTasksByDate(filtered),
+      completedGroupKey: 'Hoàn thành',
+    );
 
     return Column(
       children: [
@@ -127,6 +181,17 @@ class TaskHub extends ConsumerWidget {
           tt: tt,
           cs: cs,
         ),
+        // Date range filter — chỉ hiển thị khi bucket == all.
+        if (bucket == TaskFilterBucket.all) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _DateRangeTabs(
+            current: dateRange,
+            onChange: (r) =>
+                ref.read(taskHubDateRangeProvider.notifier).state = r,
+            tt: tt,
+            cs: cs,
+          ),
+        ],
         const SizedBox(height: AppSpacing.sm),
         Expanded(
           child: tasks.when(
@@ -457,6 +522,94 @@ class _FilterTabs extends StatelessWidget {
   }
 }
 
+/// Date range filter chips — nhỏ gọn hơn `_FilterTabs` (chỉ label, không count).
+class _DateRangeTabs extends StatelessWidget {
+  const _DateRangeTabs({
+    required this.current,
+    required this.onChange,
+    required this.tt,
+    required this.cs,
+  });
+  final TaskDateRange current;
+  final ValueChanged<TaskDateRange> onChange;
+  final TextTheme tt;
+  final ColorScheme cs;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        children: TaskDateRange.values.map((r) {
+          final selected = r == current;
+          return Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.xs),
+            child: GestureDetector(
+              onTap: () => onChange(r),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? cs.secondaryContainer
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: selected
+                        ? cs.secondary
+                        : cs.outline.withAlpha(60),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _iconFor(r),
+                      size: 13,
+                      color: selected
+                          ? cs.onSecondaryContainer
+                          : cs.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      r.label,
+                      style: tt.labelMedium?.copyWith(
+                        color: selected
+                            ? cs.onSecondaryContainer
+                            : cs.onSurfaceVariant,
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  IconData _iconFor(TaskDateRange r) {
+    switch (r) {
+      case TaskDateRange.today:
+        return Icons.today_outlined;
+      case TaskDateRange.last7:
+        return Icons.calendar_view_week_outlined;
+      case TaskDateRange.last30:
+        return Icons.calendar_view_month_outlined;
+      case TaskDateRange.thisMonth:
+        return Icons.calendar_month_outlined;
+      case TaskDateRange.all:
+        return Icons.all_inclusive_rounded;
+    }
+  }
+}
+
 class _EmptyBucket extends StatelessWidget {
   const _EmptyBucket({
     required this.bucket,
@@ -545,14 +698,4 @@ class _ErrorRetry extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Hiển thị thời gian overdue theo ngày + cảnh báo nổi bật. Helper export.
-String formatOverdueDays(DateTime? dueDate) {
-  if (dueDate == null) return '';
-  final today = todayInVN();
-  final due = dateOnlyInVN(dueDate);
-  final diff = due.difference(today).inDays;
-  if (diff >= 0) return '';
-  return '${diff.abs()} ngày quá hạn';
 }

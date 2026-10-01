@@ -129,14 +129,6 @@ class SNMSBottomNav extends StatelessWidget {
             label: 'My Tasks',
           ),
           NavigationDestination(
-            icon: Icon(Icons.sensors_outlined),
-            selectedIcon: IconTheme(
-              data: const IconThemeData(color: Colors.white, size: 26),
-              child: Icon(Icons.sensors_rounded),
-            ),
-            label: 'IoT',
-          ),
-          NavigationDestination(
             icon: Icon(Icons.smart_toy_outlined),
             selectedIcon: IconTheme(
               data: const IconThemeData(color: Colors.white, size: 26),

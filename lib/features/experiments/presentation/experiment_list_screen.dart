@@ -53,28 +53,28 @@ class ExperimentListScreen extends ConsumerWidget {
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   _FilterChip(
-                    label: 'Draft',
+                    label: 'Bản nháp',
                     isSelected: currentFilter.status == ExperimentStatus.draft,
                     onTap: () => ref.read(experimentFilterProvider.notifier).state =
                         ExperimentFilter(status: ExperimentStatus.draft),
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   _FilterChip(
-                    label: 'Pending',
+                    label: 'Chờ duyệt',
                     isSelected: currentFilter.status == ExperimentStatus.pending,
                     onTap: () => ref.read(experimentFilterProvider.notifier).state =
                         ExperimentFilter(status: ExperimentStatus.pending),
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   _FilterChip(
-                    label: 'Active',
+                    label: 'Đang chạy',
                     isSelected: currentFilter.status == ExperimentStatus.active,
                     onTap: () => ref.read(experimentFilterProvider.notifier).state =
                         ExperimentFilter(status: ExperimentStatus.active),
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   _FilterChip(
-                    label: 'Completed',
+                    label: 'Hoàn thành',
                     isSelected: currentFilter.status == ExperimentStatus.completed,
                     onTap: () => ref.read(experimentFilterProvider.notifier).state =
                         ExperimentFilter(status: ExperimentStatus.completed),
@@ -155,7 +155,7 @@ class ExperimentListScreen extends ConsumerWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: const Text('Hủy'),
             ),
             ElevatedButton(
               onPressed: () {

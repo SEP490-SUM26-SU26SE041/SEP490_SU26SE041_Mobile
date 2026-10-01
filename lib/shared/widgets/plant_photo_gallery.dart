@@ -92,13 +92,13 @@ class PlantPhotoGallery extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.photo_camera_outlined,
+              Icons.assignment_outlined,
               size: 32,
               color: Theme.of(context).colorScheme.onSurface.withAlpha(102),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Chưa có hình ảnh cây gần đây',
+              'Chưa có báo cáo gần đây',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
                   ),
@@ -172,12 +172,25 @@ class _PhotoCard extends StatelessWidget {
   }
 
   Widget _buildErrorPlaceholder(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Icon(
-        Icons.broken_image_outlined,
-        color: Theme.of(context).colorScheme.onSurface.withAlpha(77),
-        size: 40,
+      color: cs.surfaceContainerHighest,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.photo_camera_outlined,
+            color: cs.onSurface.withAlpha(77),
+            size: 32,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Chưa có ảnh',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: cs.onSurface.withAlpha(128),
+                ),
+          ),
+        ],
       ),
     );
   }

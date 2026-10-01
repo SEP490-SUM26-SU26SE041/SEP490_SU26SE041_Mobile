@@ -62,7 +62,7 @@ class AiBadge extends StatelessWidget {
           children: [
             Icon(Icons.refresh_rounded, color: Colors.white, size: 11),
             SizedBox(width: 2),
-            Text('Retry',
+            Text('Thử lại',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 9,

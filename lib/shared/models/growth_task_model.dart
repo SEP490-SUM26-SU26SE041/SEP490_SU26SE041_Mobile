@@ -199,10 +199,21 @@ class TaskModel {
   }
 
   static TaskStatus _parseTaskStatus(String? status) {
+    // Mọi status "đóng" (task đã kết thúc vòng đời dù thành công hay thất bại)
+    // đều map về `completed` để:
+    //   - Hiển thị trong tab "Hoàn thành".
+    //   - KHÔNG hiển thị badge "Quá hạn X ngày" dù dueDate đã trôi qua.
     return switch (status?.toLowerCase()) {
       'pending' => TaskStatus.pending,
       'inprogress' || 'in_progress' => TaskStatus.inProgress,
-      'completed' => TaskStatus.completed,
+      'completed' ||
+      'approved' ||
+      'submitted' ||
+      'cancelled' ||
+      'rejected' ||
+      'resigned' ||
+      'reassigned' =>
+        TaskStatus.completed,
       'overdue' => TaskStatus.overdue,
       _ => TaskStatus.pending,
     };

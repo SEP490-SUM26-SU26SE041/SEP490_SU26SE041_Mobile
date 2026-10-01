@@ -597,13 +597,13 @@ class _TaskOverviewSection extends ConsumerWidget {
         data: (s) => Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _TaskCountChip(label: 'Pending', count: s.pendingTasks, color: AppColors.warning),
+            _TaskCountChip(label: 'Chờ xử lý', count: s.pendingTasks, color: AppColors.warning),
             Container(width: 1, height: 40, color: isDark ? AppColors.borderDark : AppColors.borderLight),
-            _TaskCountChip(label: 'In Progress', count: s.inProgressTasks, color: AppColors.info),
+            _TaskCountChip(label: 'Đang làm', count: s.inProgressTasks, color: AppColors.info),
             Container(width: 1, height: 40, color: isDark ? AppColors.borderDark : AppColors.borderLight),
-            _TaskCountChip(label: 'Completed', count: s.completedTasks, color: AppColors.success),
+            _TaskCountChip(label: 'Hoàn thành', count: s.completedTasks, color: AppColors.success),
             Container(width: 1, height: 40, color: isDark ? AppColors.borderDark : AppColors.borderLight),
-            _TaskCountChip(label: 'Overdue', count: s.overdueTasks, color: AppColors.error),
+            _TaskCountChip(label: 'Quá hạn', count: s.overdueTasks, color: AppColors.error),
           ],
         ),
         loading: () => const SizedBox(height: 60, child: Center(child: CircularProgressIndicator())),
@@ -731,9 +731,9 @@ class _PendingTasksSection extends ConsumerWidget {
   String _formatDue(DateTime dt) {
     final now = DateTime.now();
     final diff = dt.difference(now);
-    if (diff.isNegative) return 'Overdue';
-    if (diff.inDays == 0) return 'Today';
-    if (diff.inDays == 1) return 'Tomorrow';
+    if (diff.isNegative) return 'Quá hạn';
+    if (diff.inDays == 0) return 'Hôm nay';
+    if (diff.inDays == 1) return 'Ngày mai';
     return '${dt.day}/${dt.month}';
   }
 }
@@ -1067,12 +1067,12 @@ class _PremiumExperimentCard extends StatelessWidget {
       };
 
   String _statusLabel(ExperimentStatus s) => switch (s) {
-        ExperimentStatus.active => 'Active',
-        ExperimentStatus.planning => 'Planning',
-        ExperimentStatus.completed => 'Completed',
-        ExperimentStatus.paused => 'Paused',
-        ExperimentStatus.draft => 'Draft',
-        ExperimentStatus.pending => 'Pending',
+        ExperimentStatus.active => 'Đang chạy',
+        ExperimentStatus.planning => 'Đang lên kế hoạch',
+        ExperimentStatus.completed => 'Hoàn thành',
+        ExperimentStatus.paused => 'Tạm dừng',
+        ExperimentStatus.draft => 'Bản nháp',
+        ExperimentStatus.pending => 'Chờ duyệt',
       };
 
   @override

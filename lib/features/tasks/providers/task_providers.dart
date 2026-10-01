@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/models/task_model.dart';
-import '../../../core/api/models/task_report_model.dart';
 import '../../../core/api/services/task_api_service.dart';
 import '../../../core/api/services/task_report_api_service.dart';
 import '../../../core/api/services/task_image_api_service.dart';
@@ -21,6 +20,7 @@ class TaskRepository {
   TaskRepository(this._api, this._apiTaskReport, this._apiTaskImage);
   final TaskApiService _api;
   final TaskReportApiService _apiTaskReport;
+  // ignore: unused_field
   final TaskImageApiService _apiTaskImage;
 
   // ─── Mobile: Technician / Student ─────────────────────────────────
@@ -127,25 +127,37 @@ class TaskRepository {
     // Backend `/task-reports/task/{taskId}` returns reports kèm `images` embed
     // sẵn (xem logs). Không cần gọi `/task-images/report/{id}` (endpoint này
     // trả 404). Dùng trực tiếp `report.images`.
-    final reports = await _apiTaskReport.getReportsByTask(taskId);
-    final allImages = <internal.TaskImageModel>[];
-    for (final r in reports) {
-      final imgs = r.images ?? const <TaskImageModel>[];
-      for (final img in imgs) {
-        allImages.add(internal.TaskImageModel(
-          id: img.id,
-          experimentId: img.experimentId,
-          batchId: img.batchId,
-          taskReportId: img.taskReportId,
-          imageUrl: img.imageUrl,
-          uploadedBy: img.uploadedBy,
-          capturedAt: img.capturedAt,
-          createdAt: img.createdAt,
-        ));
-      }
-    }
-    return allImages;
+    //
+    // Lưu ý: provider layer (`taskImagesByTaskProvider`) share cache với
+    // `taskReportByTaskProvider` rồi — chỗ này chỉ dùng khi caller là repo.
+    final reports = await getTaskReportsByTaskId(taskId);
+    return _flattenImagesFromReports(reports);
   }
+}
+
+/// Convert danh sách reports đã fetch thành list ảnh phẳng.
+///
+/// Được share giữa [_TaskRepository.getTaskReportsByTaskId],
+/// [_TaskRepository.getTaskImagesByTaskId] và [taskImagesByTaskProvider] để
+/// tránh gọi API `/task-reports/task/{id}` 2 lần cho cùng 1 task.
+List<internal.TaskImageModel> _flattenImagesFromReports(
+    List<internal.TaskReportModel> reports) {
+  final allImages = <internal.TaskImageModel>[];
+  for (final r in reports) {
+    for (final img in r.images) {
+      allImages.add(internal.TaskImageModel(
+        id: img.id,
+        experimentId: img.experimentId,
+        batchId: img.batchId,
+        taskReportId: img.taskReportId,
+        imageUrl: img.imageUrl,
+        uploadedBy: img.uploadedBy,
+        capturedAt: img.capturedAt,
+        createdAt: img.createdAt,
+      ));
+    }
+  }
+  return allImages;
 }
 
 // ─── All Tasks (Researcher: created tasks, Technician/Student: assigned tasks) ──
@@ -159,7 +171,7 @@ final tasksProvider = FutureProvider.autoDispose<List<internal.TaskModel>>((ref)
 internal.TaskModel _toInternalTask(TaskModel api) {
   return internal.TaskModel(
     id: api.id,
-    taskName: api.title ?? 'Công việc',
+    taskName: api.title.isEmpty ? 'Công việc' : api.title,
     taskType: _toInternalTaskType(api.taskType),
     experimentId: api.experimentId,
     stageId: api.experimentStageId,
@@ -190,13 +202,22 @@ internal.TaskType _toInternalTaskType(TaskType t) {
 }
 
 internal.TaskStatus _toInternalTaskStatus(TaskStatus s) {
+  // Mọi status "đóng" (task đã kết thúc vòng đời dù thành công hay thất bại)
+  // đều map về `completed` để:
+  //   - Hiển thị trong bucket "Hoàn thành".
+  //   - KHÔNG hiển thị badge "Quá hạn X ngày" dù dueDate đã trôi qua.
   return switch (s) {
     TaskStatus.pending    => internal.TaskStatus.pending,
     TaskStatus.inProgress => internal.TaskStatus.inProgress,
-    TaskStatus.completed => internal.TaskStatus.completed,
-    TaskStatus.approved  => internal.TaskStatus.completed,
-    TaskStatus.submitted => internal.TaskStatus.completed,
-    _                    => internal.TaskStatus.overdue,
+    TaskStatus.completed ||
+    TaskStatus.approved ||
+    TaskStatus.submitted ||
+    TaskStatus.cancelled ||
+    TaskStatus.rejected ||
+    TaskStatus.resigned ||
+    TaskStatus.reassigned =>
+      internal.TaskStatus.completed,
+    TaskStatus.overdue => internal.TaskStatus.overdue,
   };
 }
 
@@ -255,10 +276,24 @@ final overdueTasksLocalProvider = FutureProvider.autoDispose<List<TaskModel>>((r
   final todayLocal = DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
 
   return all.where((t) {
-    if (t.status == TaskStatus.completed) return false;
+    // Loại tất cả task "đóng" (Completed / Approved / Submitted / Cancelled /
+    // Rejected / Resigned / Reassigned) — không tính quá hạn cho task đã kết
+    // thúc vòng đời.
+    if (_isTerminalStatus(t.status)) return false;
     return t.dueDate.isBefore(todayLocal);
   }).toList();
 });
+
+/// Kiểm tra 1 status có phải "đóng" (terminal) hay không.
+bool _isTerminalStatus(TaskStatus s) {
+  return s == TaskStatus.completed ||
+      s == TaskStatus.approved ||
+      s == TaskStatus.submitted ||
+      s == TaskStatus.cancelled ||
+      s == TaskStatus.rejected ||
+      s == TaskStatus.resigned ||
+      s == TaskStatus.reassigned;
+}
 
 final upcomingTasksProvider = FutureProvider.autoDispose<List<TaskModel>>((ref) async {
   return ref.read(taskRepoProvider).getUpcomingTasks();
@@ -397,7 +432,11 @@ final taskReportByTaskProvider = FutureProvider.autoDispose.family<List<internal
 
 final taskImagesByTaskProvider = FutureProvider.autoDispose.family<List<internal.TaskImageModel>, String>(
   (ref, taskId) async {
-    return ref.read(taskRepoProvider).getTaskImagesByTaskId(taskId);
+    // Share cache với `taskReportByTaskProvider` để tránh gọi
+    // `/task-reports/task/{id}` 2 lần cho cùng 1 task. Hai provider này
+    // trước đây đều fetch riêng → duplicate HTTP request.
+    final reports = await ref.watch(taskReportByTaskProvider(taskId).future);
+    return _flattenImagesFromReports(reports);
   },
 );
 

@@ -8,6 +8,7 @@ import '../../../core/utils/date_utils.dart';
 import '../../../shared/models/experiment_model.dart';
 import '../../../shared/models/growth_task_model.dart' as internal;
 import '../../../shared/widgets/staggered_list_item.dart';
+import '../../../shared/widgets/task_date_group_list.dart';
 import '../../experiments/providers/experiment_provider.dart';
 import '../../tasks/providers/task_providers.dart';
 
@@ -103,8 +104,8 @@ class _ExperimentDetailScreenState extends ConsumerState<ExperimentDetailScreen>
         body: Center(child: CircularProgressIndicator()),
       ),
       error: (e, _) => Scaffold(
-        appBar: AppBar(title: const Text('Error')),
-        body: Center(child: Text('Error: $e')),
+        appBar: AppBar(title: const Text('Lỗi')),
+        body: Center(child: Text('Đã xảy ra lỗi: $e')),
       ),
     );
   }
@@ -318,12 +319,12 @@ class _StatusBadge extends StatelessWidget {
   };
 
   String get _label => switch (status) {
-    ExperimentStatus.active    => 'Active',
-    ExperimentStatus.planning  => 'Planning',
-    ExperimentStatus.completed => 'Completed',
-    ExperimentStatus.paused    => 'Paused',
-    ExperimentStatus.draft     => 'Draft',
-    ExperimentStatus.pending   => 'Pending',
+    ExperimentStatus.active    => 'Đang chạy',
+    ExperimentStatus.planning  => 'Đang lên kế hoạch',
+    ExperimentStatus.completed => 'Hoàn thành',
+    ExperimentStatus.paused    => 'Tạm dừng',
+    ExperimentStatus.draft     => 'Bản nháp',
+    ExperimentStatus.pending   => 'Chờ duyệt',
   };
 
   @override
@@ -1660,7 +1661,7 @@ class _FullGroupCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      'Active',
+                      'Đang hoạt động',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: groupColor,
                         fontWeight: FontWeight.w600,
@@ -2111,57 +2112,9 @@ class _ExpDateChip extends StatelessWidget {
   }
 }
 
-// Section Header for Experiment Tasks
-class _ExpSectionHeader extends StatelessWidget {
-  const _ExpSectionHeader({required this.label, required this.count, this.isOverdue = false, this.isCompleted = false});
-  final String label;
-  final int count;
-  final bool isOverdue;
-  final bool isCompleted;
-
-  Color get _color {
-    if (isOverdue) return AppColors.error;
-    if (isCompleted) return AppColors.success;
-    if (label == 'Hôm nay') return AppColors.warning;
-    if (label == 'Ngày mai') return AppColors.info;
-    return AppColors.primary;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: _color.withAlpha(20),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _color.withAlpha(50)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (isOverdue) ...[Icon(Icons.warning_amber_rounded, size: 14, color: _color), const SizedBox(width: 4)],
-              if (isCompleted) ...[Icon(Icons.check_circle_rounded, size: 14, color: _color), const SizedBox(width: 4)],
-              Text(label, style: tt.labelMedium?.copyWith(fontWeight: FontWeight.w700, color: _color)),
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: _color.withAlpha(30), borderRadius: BorderRadius.circular(10)),
-                child: Text('$count', style: tt.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: _color)),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Container(height: 1, decoration: BoxDecoration(gradient: LinearGradient(colors: [_color.withAlpha(60), _color.withAlpha(0)])))),
-      ],
-    );
-  }
-}
+// Section Header cho Experiment Tasks — đã thay bằng TaskDateGroupList
+// (xem lib/shared/widgets/task_date_group_list.dart) để đồng bộ UI giữa
+// Student / Technician / Researcher / Experiment Detail.
 
 class _ExpTaskStatsBar extends StatelessWidget {
   const _ExpTaskStatsBar({required this.tasks});
@@ -2341,91 +2294,18 @@ class _ExpSmartTaskList extends StatelessWidget {
     }
   }
 
-  Map<String, List<internal.TaskModel>> get _grouped {
-    final Map<String, List<internal.TaskModel>> grouped = {};
-    final today = todayInVN();
-    final tomorrow = today.add(const Duration(days: 1));
-
-    for (final task in _filtered) {
-      final dueDate = dateOnlyInVN(task.dueDate);
-      String key;
-
-      if (task.status == internal.TaskStatus.completed) {
-        key = 'Hoàn thành';
-      } else if (dueDate.isBefore(today)) {
-        final daysOverdue = today.difference(dueDate).inDays;
-        if (daysOverdue == 1) {
-          key = 'Quá hạn 1 ngày';
-        } else if (daysOverdue <= 3) {
-          key = 'Quá hạn 1-3 ngày';
-        } else if (daysOverdue <= 7) {
-          key = 'Quá hạn 3-7 ngày';
-        } else {
-          key = 'Quá hạn $daysOverdue ngày';
-        }
-      } else if (dueDate == today) {
-        key = 'Hôm nay';
-      } else if (dueDate == tomorrow) {
-        key = 'Ngày mai';
-      } else {
-        key = 'Sắp tới';
-      }
-
-      grouped.putIfAbsent(key, () => []).add(task);
-    }
-    return grouped;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final filtered = _filtered;
-    if (filtered.isEmpty) {
-      return Center(child: Text('Không có công việc phù hợp'));
-    }
-
-    final grouped = _grouped;
-    final sections = grouped.keys.toList();
-
-    // Sort sections in logical order
-    sections.sort((a, b) {
-      final order = ['Quá hạn 1 ngày', 'Quá hạn 1-3 ngày', 'Quá hạn 3-7 ngày', 'Hôm nay', 'Ngày mai', 'Sắp tới', 'Hoàn thành'];
-      final aIndex = order.indexWhere((o) => b.contains(o));
-      final bIndex = order.indexWhere((o) => a.contains(o));
-      if (aIndex != -1 && bIndex != -1) return aIndex.compareTo(bIndex);
-      if (aIndex != -1) return -1;
-      if (bIndex != -1) return 1;
-      return a.compareTo(b);
-    });
-
-    return ListView.builder(
+    return TaskDateGroupList(
+      tasks: _filtered,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-      itemCount: sections.length,
-      itemBuilder: (context, i) {
-        final section = sections[i];
-        final sectionTasks = grouped[section]!;
-        final isOverdueSection = section.contains('Quá hạn');
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _ExpSectionHeader(
-              label: section,
-              count: sectionTasks.length,
-              isOverdue: isOverdueSection,
-              isCompleted: section == 'Hoàn thành',
-            ),
-            const SizedBox(height: 10),
-            ...sectionTasks.map((task) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _ExpPremiumTaskCard(
-                task: task,
-                onReportTap: task.status == internal.TaskStatus.completed ? () => _showReport(context, task) : null,
-              ),
-            )),
-            const SizedBox(height: 8),
-          ],
-        );
-      },
+      emptyWidget: const Center(child: Text('Không có công việc phù hợp')),
+      itemBuilder: (context, task, _) => _ExpPremiumTaskCard(
+        task: task,
+        onReportTap: task.status == internal.TaskStatus.completed
+            ? () => _showReport(context, task)
+            : null,
+      ),
     );
   }
 

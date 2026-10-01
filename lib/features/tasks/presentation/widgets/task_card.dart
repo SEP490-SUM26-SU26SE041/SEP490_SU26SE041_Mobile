@@ -42,7 +42,13 @@ class TaskCard extends StatelessWidget {
         ? api.TaskStatus.completed
         : task.status;
     final statusSpec = getStatusPillSpec(effectiveStatus);
-    final deadline = computeDeadlineChip(task.dueDate, effectiveStatus);
+    // Deadline chip: ẩn "Quá hạn X ngày" khi task thực sự chưa overdue
+    // (chỉ tính khi status==Overdue VÀ chưa có report).
+    final deadline = computeDeadlineChip(
+      task.dueDate,
+      effectiveStatus,
+      hasReport: hasReport,
+    );
 
     return Material(
       color: Colors.transparent,
